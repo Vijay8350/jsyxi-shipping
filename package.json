@@ -1,0 +1,52 @@
+{
+  "name": "jsyxi-shipping",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jsyxi Shipping — Shopify shipping app for the Indian market (spec.md build authority)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/modules/platform/locales','dist/modules/platform/locales',{recursive:true})\"",
+    "start": "node dist/main.js",
+    "start:dev": "tsx watch src/main.ts",
+    "migrate": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "migrate:create": "node-pg-migrate create",
+    "migrate:verify": "node scripts/verify-migrations.cjs",
+    "seed:couriers": "tsx scripts/seed-couriers.ts",
+    "seed:admin": "tsx scripts/seed-admin.ts",
+    "loadtest": "tsx scripts/loadtest/run.ts",
+    "smoke:db": "tsx scripts/smoke-db.ts",
+    "e2e:smoke": "tsx scripts/e2e-smoke.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "^11.0.2",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "argon2": "^0.43.0",
+    "bullmq": "^5.34.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "dotenv": "^17.4.1",
+    "ioredis": "^5.11.1",
+    "otplib": "^12.0.1",
+    "pg": "^8.13.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "node-pg-migrate": "^8.0.0",
+    "pg-query-emscripten": "^5.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

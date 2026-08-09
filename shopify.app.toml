@@ -1,0 +1,68 @@
+# Jsyxi Shipping — Shopify app configuration.
+#
+# Push it to the Developer/Partner dashboard with:
+#   shopify app deploy
+#
+# `client_id` is filled in by `shopify app config link` (see deploy/RUNBOOK.md
+# step 3). Everything else below is already correct for this codebase — the
+# values are derived from the code, not guessed, so do not hand-edit them to
+# match the dashboard; push this file and let it win.
+
+name = "Jsyxi Shipping"
+handle = "jsyxi-shipping"
+client_id = "9f2657d53aeeb33e0326f9e1c7239c83"
+application_url = "https://app.jsyxi.com"
+
+# NOT embedded, deliberately. §9.1.2 requires per-staff identity, which this app
+# reads from `associated_user` on an online-mode token (oauth.service.ts
+# resolveStaffIdentity). Flipping this to true breaks that contract and every
+# install fails with STAFF_IDENTITY_UNAVAILABLE.
+embedded = false
+
+[access_scopes]
+scopes = "read_orders,write_orders,read_fulfillments,write_fulfillments,read_locations,read_products"
+
+# CRITICAL: the app runs its own OAuth (GET /shopify/install → Shopify authorize
+# → GET /shopify/callback) and requests `grant_options[]=per-user` to obtain an
+# ONLINE token carrying `associated_user`. Shopify's managed install flow issues
+# an OFFLINE, shop-level token and skips the app's callback entirely — which
+# would silently destroy the per-staff identity model the RBAC layer depends on.
+# Leave this true.
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://app.jsyxi.com/shopify/callback"
+]
+
+[webhooks]
+# Pinned to match ADMIN_API_VERSION in shopify-graphql.client.ts. If you bump one,
+# bump the other — §8.4's fulfillment-event mapping is pinned to this version.
+api_version = "2025-01"
+
+  # NOTE: app-specific (declarative) webhook subscriptions CANNOT be declared
+  # here — Shopify rejects them whenever use_legacy_install_flow is true, and
+  # that flag is required for the online/per-staff token (see above). The six
+  # business topics the app handles:
+  #
+  #   app/uninstalled · app/subscriptions_update · orders/create ·
+  #   orders/updated · orders/cancelled · orders/fulfilled
+  #
+  # must therefore be registered PER SHOP against the Admin API after OAuth,
+  # pointing at https://app.jsyxi.com/webhooks/shopify.
+  #
+  # That registration code does not exist yet — see deploy/RUNBOOK.md
+  # "Outstanding: per-shop webhook registration". Handlers, HMAC verification
+  # and the inbox are all built and tested; only the subscribe call is missing,
+  # so until it lands no order will ever sync.
+
+  # §5.5 GDPR. These are app-level (not per-shop) and are unaffected by the
+  # legacy-install restriction above. Mandatory for every public app; these are
+  # what Shopify calls
+  # during app review, so a failure here blocks listing.
+  [webhooks.privacy_compliance]
+  customer_deletion_url = "https://app.jsyxi.com/webhooks/shopify"
+  customer_data_request_url = "https://app.jsyxi.com/webhooks/shopify"
+  shop_deletion_url = "https://app.jsyxi.com/webhooks/shopify"
+
+[build]

@@ -1,0 +1,41 @@
+[Unit]
+Description=Jsyxi Shipping (NestJS API + Shopify app surface)
+Documentation=https://app.jsyxi.com
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=jsyxi
+Group=jsyxi
+WorkingDirectory=/srv/jsyxi-shipping/current
+EnvironmentFile=/srv/jsyxi-shipping/shared/.env
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=3
+# Give in-flight requests time to drain against enableShutdownHooks().
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jsyxi-shipping
+
+# Hardening: the process needs its release dir (read-only) and the object store
+# + logs (read-write). Nothing else on the box is reachable from it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+ReadWritePaths=/srv/jsyxi-shipping/shared
+
+[Install]
+WantedBy=multi-user.target

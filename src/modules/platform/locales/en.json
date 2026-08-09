@@ -1,0 +1,34 @@
+{
+  "settings.store.title": "Store settings",
+  "settings.store.language": "Default language",
+  "settings.store.timezone": "Timezone",
+  "settings.store.currency": "Currency",
+  "settings.store.decimalSeparator": "Decimal separator",
+  "settings.store.decimalDigits": "Digits after decimal",
+  "settings.store.weightUnit": "Weight unit",
+  "settings.store.measurementUnit": "Measurement unit",
+  "settings.store.defaultParcelWeight": "Default parcel weight (kg)",
+  "settings.store.saved": "Settings saved",
+  "settings.store.conflict": "These settings were changed elsewhere. Refresh and try again.",
+  "settings.store.currencyReadOnly": "Currency comes from your Shopify shop and cannot be changed here.",
+
+  "common.save": "Save",
+  "common.cancel": "Cancel",
+  "common.confirm": "Confirm",
+  "common.close": "Close",
+  "common.retry": "Retry",
+  "common.back": "Back",
+  "common.continue": "Continue",
+  "common.loading": "Loading…",
+
+  "access.noAccess.title": "No access",
+  "access.noAccess.body": "You don't have access to {shopName} on Jsyxi yet. Nothing here is readable until the store owner grants you a role.",
+  "access.request.button": "Request access",
+  "access.request.pending": "Your access request is waiting for the store owner. We'll let you know here once it's resolved.",
+
+  "onboarding.step.plan": "Choose your plan",
+  "onboarding.step.business": "Business & GST details",
+  "onboarding.step.pickupAddress": "Pickup address",
+  "onboarding.step.connectCourier": "Connect your first courier",
+  "onboarding.step.testBooking": "Test booking"
+}

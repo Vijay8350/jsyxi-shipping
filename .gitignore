@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.production
+var/
+*.log
+*.pem
+jsyxi-deploy-key
+jsyxi-deploy-key.pub
