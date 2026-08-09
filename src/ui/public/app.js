@@ -903,53 +903,435 @@
     });
   }
 
+  /**
+   * §9.3.3 courier connect. BYOC: the merchant brings their own courier
+   * contract, so this screen is where an account is connected, tested and
+   * switched between test and live.
+   *
+   * The connect form is built from the courier's own credential-field schema
+   * rather than hardcoded per courier — adding a courier to the master data is
+   * then enough to make it connectable here.
+   */
   function screenCouriers() {
     var view = document.getElementById('view');
     view.innerHTML = '<div class="page-head"><h1>Couriers</h1></div>' + loading();
 
     Promise.all([
       api('/couriers').catch(function () { return []; }),
-      api('/courier-accounts').catch(function () { return []; }),
+      // Owner-only (§10.2). A non-Owner still sees the catalogue, just no
+      // accounts and no connect action.
+      api('/courier-accounts').then(function (r) { return { ok: r }; })
+        .catch(function (e) { return { err: e }; }),
     ]).then(function (res) {
-      var master = res[0] || [];
-      var accounts = res[1] || [];
+      var list = unwrap(res[0]).length ? unwrap(res[0]) : (res[0] || []);
+      var acctRes = res[1] || {};
+      var isOwner = !acctRes.err;
+      var accounts = unwrap(acctRes.ok).length ? unwrap(acctRes.ok) : (acctRes.ok || []);
+      if (!Array.isArray(accounts)) accounts = [];
+
       var byCourier = {};
-      (Array.isArray(accounts) ? accounts : accounts.items || []).forEach(function (a) {
-        var key = a.courierCode || a.courier_code || a.courierId;
+      accounts.forEach(function (a) {
+        var key = a.courierId || a.courier_id;
         (byCourier[key] = byCourier[key] || []).push(a);
       });
 
-      var list = (Array.isArray(master) ? master : master.items || []);
       var rows = list.map(function (c) {
-        var code = c.code || c.courierCode;
-        var accts = byCourier[code] || [];
-        var connected = accts.length > 0;
-        var health = accts[0] && (accts[0].healthState || accts[0].health_state);
+        var accts = byCourier[c.courierId] || [];
+        var a = accts[0];
+        var health = a && (a.healthState || a.health_state);
+        var mode = a && (a.mode || a.accountMode);
+        var enabled = a && (a.enabled !== undefined ? a.enabled : a.is_enabled);
+
+        var status = !a ? '<span class="badge">Not connected</span>'
+          : stateBadge(health || 'UNVERIFIED') +
+            (mode ? ' <span class="badge' + (mode === 'TEST' ? ' is-test' : '') + '">' +
+              h(mode) + '</span>' : '') +
+            (a && enabled === false ? ' <span class="badge warn">Disabled</span>' : '');
+
+        var action = !isOwner ? ''
+          : !a
+            ? '<button class="btn sm primary" data-connect="' + h(c.courierId) + '">Connect</button>'
+            : '<button class="btn sm" data-test="' + h(a.courierAccountId || a.courier_account_id) + '">Test</button>' +
+              ' <button class="btn sm" data-manage="' + h(c.courierId) + '">Manage</button>';
+
         return '<tr>' +
-          '<td><strong>' + h(c.name || titleCase(code)) + '</strong></td>' +
-          '<td class="mono muted">' + h(code) + '</td>' +
-          '<td>' + (connected
-            ? stateBadge(health || 'CONNECTED')
-            : '<span class="badge">Not connected</span>') + '</td>' +
-          '<td class="num">' + num(accts.length) + '</td>' +
+          '<td><strong>' + h(c.name || titleCase(c.code)) + '</strong>' +
+            (c.kind ? '<div class="muted" style="font-size:12px">' + h(titleCase(c.kind)) + '</div>' : '') +
+          '</td>' +
+          '<td class="mono muted">' + h(c.code) + '</td>' +
+          '<td>' + status + '</td>' +
+          '<td style="text-align:right">' + action + '</td>' +
           '</tr>';
       }).join('');
 
       view.innerHTML =
-        '<div class="page-head"><h1>Couriers</h1></div>' +
+        '<div class="page-head"><h1>Couriers</h1>' +
+          '<span class="muted">Connect your own courier contracts</span></div>' +
+        (isOwner ? '' :
+          '<div class="banner warn" style="margin-bottom:16px"><div>' +
+          'Only the store Owner can connect or change courier accounts (§10.2).' +
+          '</div></div>') +
         '<div class="card">' +
           '<div class="card-head"><h2>Launch couriers</h2><div class="spacer"></div>' +
-            '<span class="muted" style="font-size:12.5px">Bring your own courier account</span></div>' +
+            '<span class="muted" style="font-size:12.5px">' + num(list.length) + '</span></div>' +
           '<div class="card-body flush">' +
           (rows ? '<div class="table-wrap"><table class="data"><thead><tr>' +
-            '<th>Courier</th><th>Code</th><th>Status</th><th class="num">Accounts</th>' +
+            '<th>Courier</th><th>Code</th><th>Status</th><th></th>' +
             '</tr></thead><tbody>' + rows + '</tbody></table></div>'
-                : empty('No couriers seeded', 'Run the courier seed to populate the master list.')) +
+                : empty('No couriers available', 'The courier master data has not been seeded.')) +
           '</div></div>';
+
+      var host = document.getElementById('view');
+      if (!host.dataset.courierBound) {
+        host.dataset.courierBound = '1';
+        host.addEventListener('click', function (e) {
+          var el = e.target instanceof Element ? e.target : null;
+          if (!el) return;
+          var conn = el.closest('[data-connect]');
+          if (conn) {
+            var courier = list.filter(function (x) {
+              return x.courierId === conn.getAttribute('data-connect');
+            })[0];
+            if (courier) openConnectModal(courier, screenCouriers);
+            return;
+          }
+          var t = el.closest('[data-test]');
+          if (t) { runTestConnection(t.getAttribute('data-test'), screenCouriers); return; }
+          var m = el.closest('[data-manage]');
+          if (m) {
+            var cc = list.filter(function (x) { return x.courierId === m.getAttribute('data-manage'); })[0];
+            var acct = (byCourier[m.getAttribute('data-manage')] || [])[0];
+            if (cc && acct) openManageModal(cc, acct, screenCouriers);
+          }
+        });
+      }
     }).catch(function (err) {
       if (err.message === 'unauthenticated') return;
       view.innerHTML = '<div class="page-head"><h1>Couriers</h1></div>' + errorCard(err);
     });
+  }
+
+  /** Renders one credential field from the courier's own schema. */
+  function credentialField(f) {
+    var id = 'cred_' + f.key;
+    return '<label for="' + h(id) + '">' + h(f.label || f.key) +
+      (f.isRequired ? '' : ' <span class="muted">(optional)</span>') + '</label>' +
+      '<input class="input" id="' + h(id) + '" data-key="' + h(f.key) + '"' +
+        // Secrets are write-only (§5.7 control 3) — never prefilled, never
+        // echoed back, and masked while typing.
+        ' type="' + (f.isSecret ? 'password' : 'text') + '"' +
+        ' autocomplete="off" spellcheck="false"' +
+        (f.isRequired ? ' required' : '') + ' />';
+  }
+
+  function collectCredentials(scope) {
+    var creds = {};
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-key]'), function (i) {
+      var v = i.value.trim();
+      if (v) creds[i.getAttribute('data-key')] = v;
+    });
+    return creds;
+  }
+
+  function openConnectModal(courier, onDone) {
+    var fields = (courier.credentialFields || []).slice().sort(function (a, b) {
+      return (a.displayOrder || 0) - (b.displayOrder || 0);
+    });
+
+    var body =
+      '<p class="muted" style="margin-top:0">' +
+        'Enter the API credentials from your ' + h(courier.name) + ' contract. ' +
+        'They are encrypted before storage and never shown again (§5.7).' +
+      '</p>' +
+      (courier.guide && (courier.guide.url || courier.guide.text)
+        ? '<p class="muted" style="font-size:12.5px">' +
+          (courier.guide.url
+            ? 'Where to find these: <a href="' + h(courier.guide.url) + '" target="_blank" rel="noopener">' +
+              h(courier.guide.url) + '</a>'
+            : h(courier.guide.text)) + '</p>'
+        : '') +
+      /* §9.3.3 defaults to TEST. A live courier account books real parcels and
+         spends real money — opting into that should be deliberate. */
+      '<div style="display:grid;gap:8px;margin:14px 0">' +
+        '<label>Mode</label>' +
+        '<div class="seg" id="modeseg">' +
+          '<button type="button" data-mode="TEST" class="on">Test</button>' +
+          '<button type="button" data-mode="LIVE">Live</button>' +
+        '</div>' +
+        '<span class="muted" style="font-size:12.5px" id="modehint">' +
+          'Test mode books against the courier sandbox. Nothing real ships.</span>' +
+      '</div>' +
+      (fields.length
+        ? '<form id="credform" style="display:grid;gap:10px">' +
+          fields.map(credentialField).join('') + '</form>'
+        : '<div class="banner warn"><div>This courier has no credential schema configured, ' +
+          'so it cannot be connected yet.</div></div>');
+
+    var back = modal('Connect ' + courier.name, body,
+      '<span id="connmsg" class="muted"></span><div class="spacer"></div>' +
+      '<button class="btn" data-close>Cancel</button>' +
+      '<button class="btn primary" id="doconnect"' + (fields.length ? '' : ' disabled') + '>Connect</button>');
+
+    var mode = 'TEST';
+    Array.prototype.forEach.call(back.querySelectorAll('#modeseg button'), function (b) {
+      b.addEventListener('click', function () {
+        Array.prototype.forEach.call(back.querySelectorAll('#modeseg button'), function (o) {
+          o.classList.remove('on');
+        });
+        b.classList.add('on');
+        mode = b.getAttribute('data-mode');
+        back.querySelector('#modehint').textContent = mode === 'LIVE'
+          ? 'Live mode books real shipments with real money.'
+          : 'Test mode books against the courier sandbox. Nothing real ships.';
+      });
+    });
+
+    var btn = back.querySelector('#doconnect');
+    var msg = back.querySelector('#connmsg');
+    if (btn) btn.addEventListener('click', function () {
+      var form = back.querySelector('#credform');
+      if (form && !form.reportValidity()) return;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span> Connecting';
+      msg.textContent = '';
+
+      api('/courier-accounts', {
+        method: 'POST',
+        body: { courierId: courier.courierId, mode: mode, credentials: collectCredentials(back) },
+      }).then(function (acct) {
+        var id = acct && (acct.courierAccountId || acct.courier_account_id);
+        toast(courier.name + ' connected');
+        // §3.21: a new account is UNVERIFIED until a real call succeeds, so
+        // test immediately rather than leaving the merchant to wonder.
+        if (id) return runTestConnection(id, null, true);
+      }).then(function () {
+        closeModal();
+        if (onDone) onDone();
+      }).catch(function (err) {
+        if (err.message === 'unauthenticated') return;
+        btn.disabled = false;
+        btn.textContent = 'Connect';
+        var b = err.body || {};
+        // A1-12 returns per-field issues; showing them beats a generic failure.
+        var detail = Array.isArray(b.issues) && b.issues.length
+          ? b.issues.map(function (i) {
+              return (i.field || i.key || '') + ': ' + (i.message || i.reason || 'invalid');
+            }).join(' · ')
+          : (b.message || b.reason || err.message);
+        msg.innerHTML = '<span style="color:var(--bad-fg)">' + h(String(detail)) + '</span>';
+      });
+    });
+  }
+
+  function runTestConnection(accountId, onDone, quiet) {
+    return api('/courier-accounts/' + encodeURIComponent(accountId) + '/test-connection',
+      { method: 'POST', body: {} })
+      .then(function (r) {
+        var state = r && (r.healthState || r.health_state || r.state);
+        var ok = state === 'HEALTHY' || r === true || (r && r.ok);
+        if (!quiet) toast(ok ? 'Connection healthy' : 'Test finished: ' + titleCase(String(state || 'unknown')), !ok);
+        if (onDone) onDone();
+      })
+      .catch(function (err) {
+        if (err.message === 'unauthenticated') return;
+        var b = err.body || {};
+        toast('Test failed: ' + String(b.message || b.reason || err.message), true);
+        if (onDone) onDone();
+      });
+  }
+
+  /**
+   * The per-store account surface: credentials, mode, the ADD-18 webhook this
+   * store gives its courier, and which of the courier's services (shipping
+   * methods) are enabled. Every one of these is scoped to this shop's own
+   * account — a courier contract belongs to the merchant, not the platform.
+   */
+  function openManageModal(courier, acct, onDone) {
+    var accountId = acct.courierAccountId || acct.courier_account_id;
+    var mode = acct.mode || acct.accountMode || 'TEST';
+    var enabled = acct.enabled !== undefined ? acct.enabled : acct.is_enabled !== false;
+    var fields = (courier.credentialFields || []).slice().sort(function (a, b) {
+      return (a.displayOrder || 0) - (b.displayOrder || 0);
+    });
+
+    var back = modal('Manage ' + courier.name,
+      '<div style="display:grid;place-items:center;padding:26px"><span class="spin"></span></div>', '');
+
+    function fail(err) {
+      if (err.message === 'unauthenticated') return;
+      var b = err.body || {};
+      toast(String(b.message || b.reason || err.message), true);
+    }
+    function refresh() { closeModal(); if (onDone) onDone(); }
+
+    Promise.all([
+      api('/courier-accounts/' + encodeURIComponent(accountId) + '/webhook')
+        .catch(function (e) { return { __err: e }; }),
+      api('/courier-accounts/' + encodeURIComponent(accountId) + '/services')
+        .catch(function () { return []; }),
+    ]).then(function (res) {
+      var wh = res[0] || {};
+      var services = unwrap(res[1]).length ? unwrap(res[1]) : (res[1] || []);
+      if (!Array.isArray(services)) services = [];
+
+      var whBlock = wh.__err
+        ? '<div class="banner warn"><div>Webhook details unavailable: ' + h(wh.__err.message) + '</div></div>'
+        : '<p class="muted" style="font-size:12.5px;margin-top:0">' +
+            'Give this URL to ' + h(courier.name) + ' as your tracking webhook. It is unique to ' +
+            'this store and this account — events signed with your secret arrive here.</p>' +
+          '<div class="row" style="gap:8px;margin-bottom:10px">' +
+            '<input class="input mono" id="whurl" readonly style="flex:1;font-size:12px" value="' +
+              h(wh.webhookUrl || '') + '" />' +
+            '<button class="btn sm" id="copywh">Copy</button>' +
+          '</div>' +
+          '<dl class="kv" style="margin-bottom:12px">' +
+            '<dt>Signing secret</dt><dd>' + (wh.secretSet
+              ? '<span class="badge ok">Set</span>'
+              : '<span class="badge warn">Not set</span>') + '</dd>' +
+            '<dt>Events (24h)</dt><dd>' + num(wh.events24h) + '</dd>' +
+            '<dt>Signature failures (24h)</dt><dd>' +
+              (wh.signatureFailures24h > 0
+                ? '<span class="badge bad">' + num(wh.signatureFailures24h) + '</span>'
+                : num(wh.signatureFailures24h)) + '</dd>' +
+            '<dt>Last event</dt><dd>' + (wh.lastEventReceivedAt
+              ? h(dateTime(wh.lastEventReceivedAt)) : '<span class="muted">never</span>') + '</dd>' +
+          '</dl>' +
+          '<div class="row">' +
+            '<button class="btn sm" id="whtest">Send test event</button>' +
+            '<button class="btn sm" id="whsecret">Regenerate secret</button>' +
+            '<button class="btn sm" id="whtoken">Regenerate URL</button>' +
+          '</div>' +
+          '<p class="note" style="margin-bottom:0">Regenerating the URL stops the old one ' +
+            'immediately — update it with the courier first.</p>';
+
+      /* §9.3.2: services are this account's shipping methods. Disabling one
+         removes it from rate selection without touching the account. */
+      var svcBlock = services.length
+        ? '<div class="table-wrap"><table class="data"><thead><tr>' +
+          '<th>Service</th><th>Cost source</th><th></th></tr></thead><tbody>' +
+          services.map(function (s) {
+            return '<tr><td><strong>' + h(s.serviceName || s.serviceCode) + '</strong>' +
+              '<div class="mono muted" style="font-size:11.5px">' + h(s.serviceCode) + '</div></td>' +
+              '<td>' + stateBadge(s.costSource) + '</td>' +
+              '<td style="text-align:right">' +
+                '<button class="btn sm" data-svc="' + h(s.serviceId) + '" data-on="' +
+                  (s.enabled ? '1' : '0') + '">' + (s.enabled ? 'Enabled' : 'Disabled') + '</button>' +
+              '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="muted">No services are configured for this courier yet.</p>';
+
+      back.querySelector('.modal-body').innerHTML =
+        '<dl class="kv">' +
+          '<dt>Health</dt><dd>' + stateBadge(acct.healthState || acct.health_state || 'UNVERIFIED') + '</dd>' +
+          '<dt>Mode</dt><dd>' + stateBadge(mode) + '</dd>' +
+          '<dt>Account</dt><dd>' + (enabled ? 'Enabled' : '<span class="badge warn">Disabled</span>') + '</dd>' +
+        '</dl>' +
+        '<div class="row" style="margin:14px 0 20px">' +
+          '<button class="btn sm" id="switchmode">Switch to ' + (mode === 'TEST' ? 'Live' : 'Test') + '</button>' +
+          '<button class="btn sm" id="toggleenabled">' + (enabled ? 'Disable account' : 'Enable account') + '</button>' +
+          '<button class="btn sm" id="dotest">Test connection</button>' +
+        '</div>' +
+        '<h2 style="font-size:13px;margin:0 0 8px">Tracking webhook</h2>' + whBlock +
+        '<h2 style="font-size:13px;margin:22px 0 8px">Shipping services</h2>' + svcBlock +
+        '<h2 style="font-size:13px;margin:22px 0 8px">Replace credentials</h2>' +
+        '<p class="muted" style="font-size:12.5px;margin-top:0">' +
+          'Stored credentials cannot be displayed (§5.7). Entering new values replaces them.</p>' +
+        (fields.length
+          ? '<form id="credform" style="display:grid;gap:10px">' + fields.map(credentialField).join('') + '</form>'
+          : '');
+
+      back.querySelector('.modal').insertAdjacentHTML('beforeend',
+        '<div class="modal-foot"><div class="spacer"></div>' +
+        '<button class="btn" data-close>Close</button>' +
+        (fields.length ? '<button class="btn primary" id="doreplace">Replace credentials</button>' : '') +
+        '</div>');
+
+      function on(id, fn) {
+        var el = back.querySelector('#' + id);
+        if (el) el.addEventListener('click', fn);
+      }
+
+      on('switchmode', function () {
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/mode',
+          { method: 'POST', body: { mode: mode === 'TEST' ? 'LIVE' : 'TEST' } })
+          .then(function () { toast('Switched to ' + (mode === 'TEST' ? 'live' : 'test')); refresh(); })
+          .catch(fail);
+      });
+      on('toggleenabled', function () {
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/enabled',
+          { method: 'POST', body: { enabled: !enabled } })
+          .then(function () { toast(enabled ? 'Account disabled' : 'Account enabled'); refresh(); })
+          .catch(fail);
+      });
+      on('dotest', function () { runTestConnection(accountId, refresh); });
+
+      on('copywh', function () {
+        var i = back.querySelector('#whurl');
+        i.select();
+        if (navigator.clipboard) navigator.clipboard.writeText(i.value);
+        else document.execCommand('copy');
+        toast('Webhook URL copied');
+      });
+      on('whtest', function () {
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/webhook/test-event',
+          { method: 'POST', body: {} })
+          .then(function () { toast('Test event sent'); refresh(); }).catch(fail);
+      });
+      on('whsecret', function () {
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/webhook/secret',
+          { method: 'POST', body: {} })
+          .then(function (r) {
+            // The plaintext secret is returned exactly once (§5.7) — show it
+            // in a form the merchant can copy before it becomes unreadable.
+            var secret = r && (r.secret || r.webhookSecret);
+            closeModal();
+            if (secret) {
+              modal('New signing secret',
+                '<p>Copy this now — it cannot be shown again.</p>' +
+                '<input class="input mono" readonly style="width:100%;font-size:12px" value="' +
+                  h(secret) + '" />' +
+                '<p class="note">Give it to ' + h(courier.name) + ' so their events are signed with it.</p>',
+                '<div class="spacer"></div><button class="btn primary" data-close>Done</button>');
+            } else { toast('Secret regenerated'); }
+            if (onDone) onDone();
+          }).catch(fail);
+      });
+      on('whtoken', function () {
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/webhook/url-token',
+          { method: 'POST', body: {} })
+          .then(function () { toast('Webhook URL regenerated — update it with the courier'); refresh(); })
+          .catch(fail);
+      });
+
+      back.addEventListener('click', function (e) {
+        var el = e.target instanceof Element ? e.target : null;
+        var svc = el && el.closest('[data-svc]');
+        if (!svc) return;
+        var turningOn = svc.getAttribute('data-on') !== '1';
+        svc.disabled = true;
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/services', {
+          method: 'PUT',
+          body: { serviceId: svc.getAttribute('data-svc'), enabled: turningOn },
+        }).then(function () {
+          svc.disabled = false;
+          svc.setAttribute('data-on', turningOn ? '1' : '0');
+          svc.textContent = turningOn ? 'Enabled' : 'Disabled';
+          toast(turningOn ? 'Service enabled' : 'Service disabled');
+        }).catch(function (e2) { svc.disabled = false; fail(e2); });
+      });
+
+      var rep = back.querySelector('#doreplace');
+      if (rep) rep.addEventListener('click', function () {
+        var form = back.querySelector('#credform');
+        if (form && !form.reportValidity()) return;
+        rep.disabled = true;
+        rep.innerHTML = '<span class="spin"></span> Replacing';
+        api('/courier-accounts/' + encodeURIComponent(accountId) + '/credentials',
+          { method: 'POST', body: { credentials: collectCredentials(back) } })
+          .then(function () { toast('Credentials replaced'); refresh(); })
+          .catch(function (e) { rep.disabled = false; rep.textContent = 'Replace credentials'; fail(e); });
+      });
+    }).catch(fail);
   }
 
   function screenSettings() {
