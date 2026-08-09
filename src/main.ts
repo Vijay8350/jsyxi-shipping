@@ -25,6 +25,11 @@ async function bootstrap() {
   // OAuth landing surface at '/'. The console routes on the hash, so there is
   // no client-side path to 404 and no catch-all is needed.
   app.useStaticAssets(join(__dirname, 'ui', 'public'), { prefix: '/app' });
+  // §9.13/§10.3 staff console. Mounted at /staff, NOT /admin — /admin/* is the
+  // admin API, and static assets there would shadow it. It is a separate
+  // bundle behind a separate cookie (admin_session): a merchant session grants
+  // nothing here, which is a boundary worth keeping physical.
+  app.useStaticAssets(join(__dirname, 'ui', 'admin'), { prefix: '/staff' });
   // Drain in-flight requests and close pool/queue connections on SIGTERM so a
   // systemd restart is not a mid-request kill.
   app.enableShutdownHooks();

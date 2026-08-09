@@ -9,7 +9,9 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { AdminGuard, AdminRequest } from './admin.guard';
+import { AdminGuard } from '../admin/admin.guard';
+import { AdminRoles } from '../admin/admin-roles.decorator';
+import { AdminAuthenticatedRequest } from '../admin/admin.types';
 import { AnnouncementService } from './announcement.service';
 import { FeedbackService } from './feedback.service';
 import {
@@ -34,6 +36,7 @@ import { TicketService } from './ticket.service';
  */
 @Controller('admin/support')
 @UseGuards(AdminGuard)
+@AdminRoles('PLATFORM_ADMIN', 'SUPPORT_AGENT')
 export class AdminSupportController {
   constructor(
     private readonly tickets: TicketService,
@@ -74,11 +77,11 @@ export class AdminSupportController {
   /** §9.18 assignment (INV-22 version carried in the body). */
   @Post('tickets/:ticketId/assign')
   assign(
-    @Req() req: AdminRequest,
+    @Req() req: AdminAuthenticatedRequest,
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @Body() dto: AssignTicketDto,
   ) {
-    return this.tickets.assignTicket(req.adminId, ticketId, dto);
+    return this.tickets.assignTicket(req.admin.adminId, ticketId, dto);
   }
 
   /**
@@ -87,21 +90,21 @@ export class AdminSupportController {
    */
   @Post('tickets/:ticketId/messages')
   reply(
-    @Req() req: AdminRequest,
+    @Req() req: AdminAuthenticatedRequest,
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @Body() dto: TicketReplyDto,
   ) {
-    return this.tickets.replyAsAdmin(req.adminId, ticketId, dto);
+    return this.tickets.replyAsAdmin(req.admin.adminId, ticketId, dto);
   }
 
   /** §3.16 explicit transitions: OPEN→IN_PROGRESS→RESOLVED→CLOSED. */
   @Post('tickets/:ticketId/transition')
   transition(
-    @Req() req: AdminRequest,
+    @Req() req: AdminAuthenticatedRequest,
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @Body() dto: TransitionTicketDto,
   ) {
-    return this.tickets.transitionTicket(req.adminId, ticketId, dto);
+    return this.tickets.transitionTicket(req.admin.adminId, ticketId, dto);
   }
 
   /** §9.18 canned replies — a code-constant store (see support.types.ts). */
@@ -114,8 +117,8 @@ export class AdminSupportController {
 
   /** §9.19 composer (§3.29 audience, §3.31 type). Draft until published. */
   @Post('announcements')
-  compose(@Req() req: AdminRequest, @Body() dto: ComposeAnnouncementDto) {
-    return this.announcements.compose(req.adminId, dto);
+  compose(@Req() req: AdminAuthenticatedRequest, @Body() dto: ComposeAnnouncementDto) {
+    return this.announcements.compose(req.admin.adminId, dto);
   }
 
   @Get('announcements')
@@ -126,18 +129,18 @@ export class AdminSupportController {
   /** Publish; type WARNING also emails all Members (A2-09). */
   @Post('announcements/:announcementId/publish')
   publish(
-    @Req() req: AdminRequest,
+    @Req() req: AdminAuthenticatedRequest,
     @Param('announcementId', ParseUUIDPipe) announcementId: string,
   ) {
-    return this.announcements.publish(req.adminId, announcementId);
+    return this.announcements.publish(req.admin.adminId, announcementId);
   }
 
   @Post('announcements/:announcementId/expire')
   expire(
-    @Req() req: AdminRequest,
+    @Req() req: AdminAuthenticatedRequest,
     @Param('announcementId', ParseUUIDPipe) announcementId: string,
   ) {
-    return this.announcements.expire(req.adminId, announcementId);
+    return this.announcements.expire(req.admin.adminId, announcementId);
   }
 
   /* ----------------------------- Feedback ----------------------------- */

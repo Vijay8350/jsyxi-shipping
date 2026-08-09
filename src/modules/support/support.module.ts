@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RolesGuard } from '../team/rbac/roles.guard';
 import { AdminSupportController } from './admin-support.controller';
-import { AdminGuard } from './admin.guard';
+import { AdminModule } from '../admin/admin.module';
 import { AnnouncementService } from './announcement.service';
 import { FeedbackService } from './feedback.service';
 import { SupportController } from './support.controller';
@@ -17,15 +17,16 @@ import { TicketService } from './ticket.service';
  * BINDING POINTS for the parent:
  *  - AppModule must import SupportModule (not wired here — app.module.ts is
  *    shared with sibling builds).
- *  - AdminGuard is a seam: the sibling §10.3 admin-auth module replaces it
- *    and supplies a real admin identity (see admin.guard.ts).
+ *  - Admin endpoints use the §10.3 AdminGuard from the admin module (real
+ *    admin_session + per-endpoint roles). The local placeholder guard that
+ *    accepted a shared header token is gone.
  *  - Attachment binaries flow through the booking-ops ObjectStore; this
  *    module validates and stores only {key, bytes} references (§5.1).
  */
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, AdminModule],
   controllers: [SupportController, AdminSupportController],
-  providers: [TicketService, AnnouncementService, FeedbackService, RolesGuard, AdminGuard],
+  providers: [TicketService, AnnouncementService, FeedbackService, RolesGuard],
   exports: [TicketService, AnnouncementService, FeedbackService],
 })
 export class SupportModule {}

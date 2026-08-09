@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Jsyxi Staff</title>
+<!--
+  Served from /staff, not /admin: /admin/* is the API surface, and mounting
+  static assets there would shadow it.
+
+  Reuses the merchant console's design system rather than forking it — one set
+  of tokens, so the two surfaces cannot drift apart visually. The staff console
+  is distinguished by its own accent, not its own design language.
+-->
+<link rel="preload" href="/app/fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/app/fonts/space-grotesk-latin-var.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="stylesheet" href="/app/app.css" />
+<style>
+  /* The one visual difference: staff surfaces carry a distinct accent so it is
+     never ambiguous whether you are looking at one merchant's data or all of
+     them. */
+  .sidebar { background: #2a1e3d; }
+  :root { --sidebar-edge: #3d2d57; }
+  .nav-item.active { background: #4c3a6b; }
+  .brand-mark { background: linear-gradient(135deg, #8b6fc0, #5b4a8a); }
+  .staff-tag { background: #4c3a6b; color: #fff; }
+</style>
+</head>
+<body>
+  <div id="root">
+    <div style="display:grid;place-items:center;min-height:100vh">
+      <span class="spin" aria-label="Loading"></span>
+    </div>
+  </div>
+  <div class="toast-host" id="toasts" aria-live="polite"></div>
+  <script src="/staff/admin.js"></script>
+</body>
+</html>
