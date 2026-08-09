@@ -208,6 +208,194 @@
     return isTest ? ' <span class="badge is-test">Test</span>' : '';
   }
 
+  // ─── Modal ────────────────────────────────────────────────────────────
+  var openModal = null;
+
+  function modal(title, bodyHtml, footHtml) {
+    closeModal();
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true" aria-label="' + h(title) + '">' +
+        '<div class="modal-head"><h2>' + h(title) + '</h2><div class="spacer"></div>' +
+          '<button class="x" data-close aria-label="Close">×</button></div>' +
+        '<div class="modal-body">' + bodyHtml + '</div>' +
+        (footHtml ? '<div class="modal-foot">' + footHtml + '</div>' : '') +
+      '</div>';
+    document.body.appendChild(back);
+    openModal = back;
+
+    back.addEventListener('click', function (e) {
+      if (e.target === back || e.target.hasAttribute('data-close')) closeModal();
+    });
+    document.addEventListener('keydown', escClose);
+    return back;
+  }
+
+  function escClose(e) { if (e.key === 'Escape') closeModal(); }
+
+  function closeModal() {
+    if (openModal) { openModal.remove(); openModal = null; }
+    document.removeEventListener('keydown', escClose);
+  }
+
+  // ─── Ship flow (§9.5.1) ───────────────────────────────────────────────
+  function openShipModal(shipmentId, onDone) {
+    var back = modal('Ship', '<div style="display:grid;place-items:center;padding:30px">' +
+      '<span class="spin"></span></div>', '');
+
+    api('/shipments/' + encodeURIComponent(shipmentId) + '/ship-modal').then(function (m) {
+      var chosen = null;
+
+      var candidates = (m.candidates || []);
+      var candHtml = candidates.length ? candidates.map(function (c, i) {
+        var bookable = c.serviceable !== false;
+        var edd = c.eddFrom
+          ? new Date(c.eddFrom).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) +
+            (c.eddTo && c.eddTo !== c.eddFrom
+              ? '–' + new Date(c.eddTo).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+              : '')
+          : null;
+        var meta = [];
+        if (edd) meta.push('ETA ' + edd);
+        if (c.costSource) meta.push(titleCase(c.costSource));
+        // A TEST-mode courier account can only ever produce a test shipment;
+        // saying so here is cheaper than explaining it after the fact.
+        if (c.accountMode === 'TEST') meta.push('Test account');
+        if (!bookable && c.failureReasons && c.failureReasons.length) {
+          meta.push(c.failureReasons.map(titleCase).join(', '));
+        }
+        return '<button class="cand" data-i="' + i + '"' + (bookable ? '' : ' disabled') + '>' +
+          '<div class="grow"><div class="name">' + h(c.serviceName || c.serviceCode) +
+            (c.accountMode === 'TEST' ? ' <span class="badge is-test">Test</span>' : '') + '</div>' +
+            '<div class="meta">' + h(meta.join(' · ') || '—') + '</div></div>' +
+          '<div class="price">' + (c.estimate ? money(c.estimate.total) : '—') + '</div>' +
+          '</button>';
+      }).join('') : empty('No courier can serve this shipment',
+        'Connect a courier account, or check serviceability for the destination pincode.');
+
+      var w = m.weight || {};
+      var pp = m.packageProfile;
+
+      // INV-20: a line with no resolvable weight changes the billed weight, so
+      // it is stated before booking rather than discovered on the invoice.
+      var noWeight = (w.noWeightLines || []).length
+        ? '<div class="banner warn" style="margin-bottom:14px"><div>' +
+          '<strong>' + (w.noWeightLines.length) + ' line(s) have no weight.</strong><br>' +
+          'They are excluded from the dead weight below, so the courier may bill more than this estimate.' +
+          '</div></div>'
+        : '';
+
+      // §4.7: only one shipment on an order carries the Collectible.
+      var codWarn = (m.cod && m.cod.splitWarning)
+        ? '<div class="banner warn" style="margin-bottom:14px"><div>' +
+          '<strong>This order has ' + num(m.cod.siblingCount) + ' shipments.</strong><br>' +
+          (m.cod.thisShipmentWouldCarry
+            ? 'Booking this one first makes it collect the full ₹' +
+              h(m.cod.orderCodOutstanding || '0') + '. The others will collect nothing.'
+            : 'Another shipment already carries the COD amount; this one will collect nothing.') +
+          '</div></div>'
+        : '';
+
+      var body =
+        noWeight + codWarn +
+        '<dl class="kv" style="margin-bottom:16px">' +
+          '<dt>Payment</dt><dd>' + stateBadge(m.paymentMode) + '</dd>' +
+          '<dt>Collectible</dt><dd class="money">' +
+            (Number(m.collectible) > 0 ? money(m.collectible) : '—') + '</dd>' +
+          '<dt>Dead weight</dt><dd>' + h(w.deadWeightKg || '—') + ' kg' +
+            (w.usedDefaultParcelWeight ? ' <span class="badge warn">default used</span>' : '') + '</dd>' +
+          (pp ? '<dt>Package</dt><dd>' + h(pp.name || 'Default') + ' · ' +
+            h(pp.lengthCm) + '×' + h(pp.widthCm) + '×' + h(pp.heightCm) + ' cm</dd>' : '') +
+        '</dl>' +
+        '<h2 style="font-size:13px;margin-bottom:9px">Courier</h2>' +
+        '<div id="cands">' + candHtml + '</div>';
+
+      var foot =
+        '<span class="muted" id="shipmsg"></span><div class="spacer"></div>' +
+        '<button class="btn" data-close>Cancel</button>' +
+        '<button class="btn primary" id="dobook" disabled>Book</button>';
+
+      back.querySelector('.modal-body').innerHTML = body;
+      back.querySelector('.modal').insertAdjacentHTML('beforeend',
+        '<div class="modal-foot">' + foot + '</div>');
+
+      var bookBtn = back.querySelector('#dobook');
+      var msg = back.querySelector('#shipmsg');
+
+      Array.prototype.forEach.call(back.querySelectorAll('.cand'), function (el) {
+        el.addEventListener('click', function () {
+          if (el.hasAttribute('disabled')) return;
+          Array.prototype.forEach.call(back.querySelectorAll('.cand'), function (o) {
+            o.classList.remove('sel');
+          });
+          el.classList.add('sel');
+          chosen = candidates[Number(el.getAttribute('data-i'))];
+          bookBtn.disabled = false;
+        });
+      });
+
+      back.addEventListener('click', function (e) {
+        if (e.target !== bookBtn) return;
+        if (!chosen) return;
+        bookBtn.disabled = true;
+        bookBtn.innerHTML = '<span class="spin"></span> Booking';
+        msg.textContent = '';
+
+        api('/shipments/' + encodeURIComponent(shipmentId) + '/book', {
+          method: 'POST',
+          body: {
+            serviceId: chosen.serviceId,
+            packageProfileId: pp ? pp.packageProfileId : undefined,
+          },
+        }).then(function (res) {
+          closeModal();
+          toast('Booking queued' + (res && res.merchantReference ? ' · ' + res.merchantReference : ''));
+          if (onDone) onDone();
+        }).catch(function (err) {
+          if (err.message === 'unauthenticated') return;
+          bookBtn.disabled = false;
+          bookBtn.textContent = 'Book';
+          /* INV-20: a guard failure comes back as a structured 422 and must be
+             shown as itself — never flattened into "something went wrong". */
+          var body = err.body || {};
+          var reason = body.reason || body.code || body.status || err.message;
+          msg.innerHTML = '<span style="color:var(--bad-fg)">' + h(titleCase(String(reason))) + '</span>';
+          toast(titleCase(String(reason)), true);
+        });
+      });
+    }).catch(function (err) {
+      if (err.message === 'unauthenticated') return;
+      back.querySelector('.modal-body').innerHTML =
+        '<div class="banner bad"><div><strong>Could not open the ship modal.</strong><br>' +
+        h(err.message) + '</div></div>';
+    });
+  }
+
+  function cancelShipment(shipmentId, onDone) {
+    var back = modal('Cancel shipment',
+      '<p>This cancels the booking with the courier. It cannot be undone, and a ' +
+      'cancelled shipment must be re-booked from scratch.</p>',
+      '<div class="spacer"></div><button class="btn" data-close>Keep it</button>' +
+      '<button class="btn primary" id="doCancel">Cancel shipment</button>');
+
+    back.querySelector('#doCancel').addEventListener('click', function (e) {
+      var b = e.target;
+      b.disabled = true;
+      b.innerHTML = '<span class="spin"></span> Cancelling';
+      api('/shipments/' + encodeURIComponent(shipmentId) + '/cancel', { method: 'POST', body: {} })
+        .then(function () {
+          closeModal(); toast('Shipment cancelled'); if (onDone) onDone();
+        })
+        .catch(function (err) {
+          if (err.message === 'unauthenticated') return;
+          closeModal();
+          var body = err.body || {};
+          toast(titleCase(String(body.reason || body.status || err.message)), true);
+        });
+    });
+  }
+
   // ─── List helper ──────────────────────────────────────────────────────
   function listController(opts) {
     // Shared query state for the two list screens.
@@ -276,6 +464,23 @@
         document.getElementById('st').addEventListener('change', function (e) {
           q.state = e.target.value; q.offset = 0; render();
         });
+        /* Row actions are delegated, and bound ONCE per painted shell. render()
+           re-runs on every filter change and keystroke; binding here without
+           the guard would stack a listener each time and fire the modal N
+           times on one click. The flag lives on the element, which paint()
+           recreates, so it resets exactly when it should. */
+        if (!view.dataset.rowActionsBound) {
+          view.dataset.rowActionsBound = '1';
+          view.addEventListener('click', function (e) {
+            var el = e.target instanceof Element ? e.target : null;
+            if (!el) return;
+            var ship = el.closest('[data-ship]');
+            if (ship) { openShipModal(ship.getAttribute('data-ship'), render); return; }
+            var cancel = el.closest('[data-cancel]');
+            if (cancel) { cancelShipment(cancel.getAttribute('data-cancel'), render); }
+          });
+        }
+
         var prev = document.getElementById('prev');
         var next = document.getElementById('next');
         if (prev) prev.addEventListener('click', function () {
@@ -431,9 +636,18 @@
     emptySub: 'A shipment appears once an order is ready to book.',
     columns: [
       { label: 'AWB' }, { label: 'Order' }, { label: 'Courier' }, { label: 'Booking' },
-      { label: 'Movement' }, { label: 'Custody' }, { label: 'COD', num: true }, { label: 'Booked' },
+      { label: 'Movement' }, { label: 'COD', num: true }, { label: 'Booked' }, { label: '' },
     ],
     row: function (s) {
+      /* §3.2/§3.3: only a DRAFT can be booked, and only a booked shipment that
+         has not yet entered courier custody can be cancelled. Offering an
+         action the state machine would refuse is worse than offering none. */
+      var action = '';
+      if (s.bookingState === 'DRAFT' || s.bookingState === 'FAILED') {
+        action = '<button class="btn sm primary" data-ship="' + h(s.shipmentId) + '">Ship</button>';
+      } else if (s.bookingState === 'CONFIRMED' && s.custodyState === 'PICKUP_PENDING') {
+        action = '<button class="btn sm" data-cancel="' + h(s.shipmentId) + '">Cancel</button>';
+      }
       return '<tr>' +
         '<td class="mono">' + (s.awb ? h(s.awb) : '<span class="muted">not booked</span>') +
           testMarker(s.isTest) + '</td>' +
@@ -442,9 +656,9 @@
         '<td>' + (s.courierCode ? h(titleCase(s.courierCode)) : '<span class="muted">—</span>') + '</td>' +
         '<td>' + stateBadge(s.bookingState) + '</td>' +
         '<td>' + stateBadge(s.movementState) + '</td>' +
-        '<td>' + stateBadge(s.custodyState) + '</td>' +
         '<td class="num money">' + (Number(s.collectible) > 0 ? money(s.collectible) : '<span class="muted">—</span>') + '</td>' +
         '<td class="muted">' + h(s.bookedAt ? dateTime(s.bookedAt) : '—') + '</td>' +
+        '<td style="text-align:right">' + action + '</td>' +
         '</tr>';
     },
   });

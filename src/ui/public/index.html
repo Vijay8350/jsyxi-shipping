@@ -6,16 +6,13 @@
 <meta name="color-scheme" content="light dark" />
 <title>Jsyxi Shipping</title>
 <!--
-  §9.22 locks Space Grotesk + Inter. Loaded from Google Fonts with a full
-  system fallback stack, so the console stays legible if the request is blocked
-  or offline. Self-hosting these is the hardening step — it removes a
-  third-party request from a surface that renders buyer data.
+  §9.22's typefaces are self-hosted (see @font-face in app.css) — no
+  third-party request from a page that renders buyer data, and no external
+  dependency for the console to render correctly. Preloaded because both are
+  used above the fold.
 -->
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link
-  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap"
-  rel="stylesheet" />
+<link rel="preload" href="/app/fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/app/fonts/space-grotesk-latin-var.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/app/app.css" />
 </head>
 <body>

@@ -10,6 +10,37 @@
  * that must appear wherever a test shipment appears.
  */
 
+/*
+ * §9.22's typefaces, self-hosted. Both are SIL Open Font License and both are
+ * VARIABLE, so one file per family covers the whole weight range — 70 KB for
+ * the pair, latin subset.
+ *
+ * Self-hosted rather than pulled from a font CDN: this console renders buyer
+ * data, and a third-party request from that page is a dependency and a privacy
+ * leak the app does not need. It also means the console keeps its typography
+ * with no external network at all.
+ */
+@font-face {
+  font-family: "Inter";
+  src: url("/app/fonts/inter-latin-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("/app/fonts/space-grotesk-latin-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* ─── Tokens ─────────────────────────────────────────────────────────── */
 :root {
   /* Petrol teal — the brand axis. 700 is the primary action colour. */
@@ -318,6 +349,58 @@ table.data .mono { font-family: var(--mono); font-size: 12.5px; }
         border-top-color: var(--petrol-600); border-radius: 50%;
         animation: spin .7s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Modal — the §9.5.1 ship flow ───────────────────────────────────── */
+.modal-back {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(6, 20, 26, .55); backdrop-filter: blur(2px);
+  display: grid; place-items: center; padding: 20px;
+  animation: fade var(--base);
+}
+@keyframes fade { from { opacity: 0; } }
+.modal {
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--e3);
+  width: min(760px, 100%); max-height: min(86vh, 900px);
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: pop var(--base);
+}
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.99); } }
+.modal-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 15px 18px; border-bottom: 1px solid var(--border); flex: 0 0 auto;
+}
+.modal-head .spacer { flex: 1; }
+.modal-body { padding: 18px; overflow-y: auto; flex: 1 1 auto; }
+.modal-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px; border-top: 1px solid var(--border);
+  background: var(--surface-sunk); flex: 0 0 auto;
+}
+.modal-foot .spacer { flex: 1; }
+.x {
+  border: 0; background: transparent; color: var(--text-muted);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 8px;
+  border-radius: var(--r-sm); transition: background var(--fast), color var(--fast);
+}
+.x:hover { background: var(--surface-sunk); color: var(--text); }
+
+/* Selectable courier candidate (§9.5.1). */
+.cand {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface); cursor: pointer; font: inherit; color: inherit;
+  transition: border-color var(--fast), box-shadow var(--fast), background var(--fast);
+}
+.cand + .cand { margin-top: 8px; }
+.cand:hover:not([disabled]) { border-color: var(--petrol-400); box-shadow: var(--e1); }
+.cand.sel { border-color: var(--petrol-600); box-shadow: 0 0 0 3px
+            color-mix(in srgb, var(--petrol-400) 20%, transparent); }
+.cand[disabled] { opacity: .55; cursor: not-allowed; background: var(--surface-sunk); }
+.cand .grow { flex: 1; min-width: 0; }
+.cand .name { font-weight: 600; font-size: 13.5px; }
+.cand .meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.cand .price { font-family: var(--display); font-size: 17px; font-weight: 600;
+               font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .toast-host { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 100; }
 .toast {
