@@ -8,6 +8,7 @@ import { ShopifyEntryService } from './entry.service';
 import { ShopifyEntryController } from './entry.controller';
 import { ShopifyWebhookDispatcher } from './webhook-dispatcher.service';
 import { ShopifyWebhookIngestService } from './webhook-ingest.service';
+import { ShopifyWebhookRegistrationService } from './webhook-registration.service';
 import { ShopifyWebhookController } from './webhooks.controller';
 import { AppSurfaceController } from './app-surface.controller';
 import { AppUninstalledHandler } from './handlers/app-uninstalled.handler';
@@ -36,8 +37,14 @@ import { AppUninstalledHandler } from './handlers/app-uninstalled.handler';
     ShopifyEntryService,
     ShopifyWebhookDispatcher,
     ShopifyWebhookIngestService,
+    ShopifyWebhookRegistrationService,
     AppUninstalledHandler,
   ],
-  exports: [ShopifyGraphqlClient, ShopifyWebhookDispatcher, EntryTokenService],
+  exports: [
+    ShopifyGraphqlClient,
+    ShopifyWebhookDispatcher,
+    EntryTokenService,
+    ShopifyWebhookRegistrationService,
+  ],
 })
 export class ShopifyModule {}

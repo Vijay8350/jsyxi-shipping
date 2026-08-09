@@ -9,6 +9,7 @@ import { EnvelopeCipher } from '../../common/envelope';
 import { hmacSha256Hex, randomToken, safeEqualHex } from '../../common/crypto';
 import { EntryTokenService } from './entry-token.service';
 import { ShopifyGraphqlClient } from './shopify-graphql.client';
+import { ShopifyWebhookRegistrationService } from './webhook-registration.service';
 
 /**
  * Shopify OAuth install flow (§9.1.1).
@@ -107,6 +108,7 @@ export class ShopifyOAuthService {
     private readonly entryTokens: EntryTokenService,
     private readonly audit: AuditService,
     private readonly graphql: ShopifyGraphqlClient,
+    private readonly webhooks: ShopifyWebhookRegistrationService,
   ) {}
 
   /** §9.1.1: validate the shop domain and build the authorize redirect. */
@@ -181,6 +183,7 @@ export class ShopifyOAuthService {
     );
     await this.seedStoreSettings(shopId, shopInfo.shop.ianaTimezone);
     await this.seedOnboardingRows(shopId);
+    await this.subscribeWebhooks(shopId);
 
     // §9.1.2: staff identity comes from exactly one place.
     const staff = resolveStaffIdentity(tokenResponse);
@@ -221,6 +224,31 @@ export class ShopifyOAuthService {
 
     const issued = await this.entryTokens.issue(shopInfo.shop.id, staff.staffUserId);
     return { entryToken: issued.token, expiresInSeconds: issued.expiresInSeconds };
+  }
+
+  /**
+   * §8.1: subscribe the shop to every handled topic. Runs after the credential
+   * is persisted, because the subscription calls authenticate as the shop.
+   *
+   * Deliberately non-fatal. A Shopify hiccup here must not strand a merchant
+   * mid-install with a shop row and no way in — and the sync is idempotent, so
+   * it can be retried. The failure is audited by the registration service
+   * (SHOPIFY_WEBHOOKS_SYNC_PARTIAL / _FAILED) rather than swallowed, because a
+   * shop with no subscriptions never syncs an order and that must be visible.
+   */
+  private async subscribeWebhooks(shopId: string): Promise<void> {
+    try {
+      await this.webhooks.syncForShop(shopId);
+    } catch (err) {
+      await this.audit.record({
+        shopId,
+        actorKind: 'SYSTEM',
+        action: 'SHOPIFY_WEBHOOKS_SYNC_FAILED',
+        objectType: 'shop',
+        objectId: shopId,
+        reason: `webhook subscription failed at install: ${(err as Error).message}`,
+      });
+    }
   }
 
   private async exchangeCode(domain: string, code: string): Promise<ShopifyTokenResponse> {

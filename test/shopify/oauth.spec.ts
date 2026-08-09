@@ -67,6 +67,11 @@ function setup(opts: { currency?: string; withUser?: boolean; memberCount?: numb
     .on(/count\(\*\)::int AS n FROM shop_member/, [{ n: memberCount }])
     .on(/INSERT INTO shop_member/, [{ member_id: 'member-1' }]);
 
+  // §8.1 webhook subscription is a side effect of a successful install; these
+  // tests assert the OAuth contract, so it is stubbed and asserted separately
+  // in webhook-registration.spec.ts.
+  const webhooks = { syncForShop: vi.fn().mockResolvedValue({ created: [], failed: [] }) };
+
   const service = new ShopifyOAuthService(
     pool as never,
     redis as never,
@@ -74,8 +79,9 @@ function setup(opts: { currency?: string; withUser?: boolean; memberCount?: numb
     entryTokens,
     audit as never,
     graphql as never,
+    webhooks as never,
   );
-  return { pool, redis, config, audit, entryTokens, graphql, service };
+  return { pool, redis, config, audit, entryTokens, graphql, webhooks, service };
 }
 
 async function beginAndGetState(service: ShopifyOAuthService): Promise<string> {
@@ -190,6 +196,37 @@ describe('ShopifyOAuthService.handleCallback (§9.1.1, INV-2)', () => {
     expect(payload.sg).toBe(SHOP_GID);
     expect(payload.su).toBe('777');
     expect(result.expiresInSeconds).toBe(300);
+  });
+
+  it('subscribes the shop to its webhook topics after persisting the credential (§8.1)', async () => {
+    const { service, webhooks } = setup();
+    const state = await beginAndGetState(service);
+    await service.handleCallback(signedQuery({ code: 'c', shop: DOMAIN, state, timestamp: '1' }));
+    // Per-shop registration is required because declarative webhooks are
+    // rejected under use_legacy_install_flow; without this call no order syncs.
+    expect(webhooks.syncForShop).toHaveBeenCalledWith('shop-1');
+  });
+
+  it('still completes the install when webhook subscription fails (§8.1)', async () => {
+    const { service, webhooks, audit, entryTokens } = setup();
+    webhooks.syncForShop.mockRejectedValueOnce(new Error('Shopify GraphQL throttled'));
+    const state = await beginAndGetState(service);
+
+    const result = await service.handleCallback(
+      signedQuery({ code: 'c', shop: DOMAIN, state, timestamp: '1' }),
+    );
+
+    // A transient Shopify failure must not strand the merchant mid-install with
+    // a shop row and no way in — the sync is idempotent and can be retried.
+    const payload = await entryTokens.verify(result.entryToken);
+    expect(payload.su).toBe('777');
+    // But it must never be silent: a shop with no subscriptions never syncs.
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'SHOPIFY_WEBHOOKS_SYNC_FAILED',
+        shopId: 'shop-1',
+      }),
+    );
   });
 
   it('creates no member row for a non-first staff user (deny-by-default, §9.1.2)', async () => {

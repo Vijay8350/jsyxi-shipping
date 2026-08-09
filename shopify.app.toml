@@ -48,13 +48,13 @@ api_version = "2025-01"
   #   app/uninstalled · app/subscriptions_update · orders/create ·
   #   orders/updated · orders/cancelled · orders/fulfilled
   #
-  # must therefore be registered PER SHOP against the Admin API after OAuth,
+  # are therefore registered PER SHOP against the Admin API after OAuth,
   # pointing at https://app.jsyxi.com/webhooks/shopify.
   #
-  # That registration code does not exist yet — see deploy/RUNBOOK.md
-  # "Outstanding: per-shop webhook registration". Handlers, HMAC verification
-  # and the inbox are all built and tested; only the subscribe call is missing,
-  # so until it lands no order will ever sync.
+  # That happens in webhook-registration.service.ts, called from the OAuth
+  # callback. The topic list is derived from the dispatcher's registered
+  # handlers, so adding a handler is what subscribes shops to it — do not
+  # maintain a second list here.
 
   # §5.5 GDPR. These are app-level (not per-shop) and are unaffected by the
   # legacy-install restriction above. Mandatory for every public app; these are

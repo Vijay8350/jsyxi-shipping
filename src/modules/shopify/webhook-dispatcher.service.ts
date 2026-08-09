@@ -35,6 +35,16 @@ export class ShopifyWebhookDispatcher {
     this.handlers.set(handler.topic, handler);
   }
 
+  /**
+   * Every topic that has a handler. This is what
+   * ShopifyWebhookRegistrationService subscribes a shop to, which makes the
+   * handler registry the single source of truth: a topic cannot be handled
+   * without being subscribed, nor subscribed without a handler to receive it.
+   */
+  topics(): string[] {
+    return [...this.handlers.keys()].sort();
+  }
+
   /** UNHANDLED means no registered topic handler — the inbox row stays RECEIVED for its owning module. */
   async dispatch(message: ShopifyWebhookMessage): Promise<DispatchOutcome> {
     const handler = this.handlers.get(message.topic);

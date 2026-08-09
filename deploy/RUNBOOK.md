@@ -26,15 +26,20 @@ are already in `.env.production`. Config was pushed with `shopify app deploy` an
 verified by pulling it back: `application_url`, `redirect_urls`, all six scopes,
 `embedded = false` and `use_legacy_install_flow = true` are live.
 
-> **Outstanding: per-shop webhook registration.** Shopify refuses app-specific
-> (declarative) webhook subscriptions while `use_legacy_install_flow = true`, so
-> the six business topics — `app/uninstalled`, `app/subscriptions_update`,
-> `orders/create|updated|cancelled|fulfilled` — must be registered per shop
-> against the Admin API after OAuth. **No code does this yet** (nothing in `src/`
-> calls `webhookSubscriptionCreate`). Handlers, HMAC verification and the inbox
-> are built and tested; only the subscribe call is missing. Until it lands, no
-> order will sync and uninstall will not be detected. The GDPR compliance
-> webhooks are app-level and are already registered.
+**Webhooks.** Shopify refuses app-specific (declarative) subscriptions while
+`use_legacy_install_flow = true`, so the six business topics —
+`app/uninstalled`, `app/subscriptions_update`,
+`orders/create|updated|cancelled|fulfilled` — are registered **per shop**
+against the Admin API at the end of the OAuth callback, by
+`src/modules/shopify/webhook-registration.service.ts`.
+
+The topic list is derived from the dispatcher's registered handlers, so a
+handler and its subscription cannot drift apart. The sync is idempotent
+(reconciles observed against desired), so reinstalls do not duplicate and it can
+be re-run as a repair. A failure never blocks the install, but is always audited
+as `SHOPIFY_WEBHOOKS_SYNC_PARTIAL` / `SHOPIFY_WEBHOOKS_SYNC_FAILED` — grep those
+in `audit_log` if a merchant reports orders not syncing. The GDPR compliance
+webhooks are app-level and registered by `shopify app deploy`.
 
 ---
 
