@@ -418,7 +418,7 @@
             var assigned = t.assignedAdminId || t.assigned_admin_id;
             return '<tr>' +
               '<td class="mono">' + h(t.number || '—') + '</td>' +
-              '<td><strong>' + h(t.subject || '—') + '</strong></td>' +
+              '<td><a class="row-link" href="#/tickets/' + h(t.ticketId || t.ticket_id) + '">' + h(t.subject || '—') + '</a></td>' +
               '<td class="muted">' + h(t.myshopifyDomain || t.myshopify_domain ||
                 String(t.shopId || t.shop_id || '').slice(0, 8)) + '</td>' +
               '<td>' + h(titleCase(t.category)) + '</td>' +
@@ -563,10 +563,133 @@
       ], rows, 'No staff users'), rows.length);
     });
 
+  /**
+   * Staff ticket view: the merchant's conversation plus the three actions
+   * §3.16 defines — assign, reply, transition. Version is echoed back on
+   * assign/transition because the ticket row is optimistically locked; acting
+   * on a stale version must fail rather than silently overwrite a colleague.
+   */
+  function screenTicket(ticketId) {
+    var view = document.getElementById('view');
+    view.innerHTML = '<div class="page-head"><h1>Ticket</h1></div>' + loading();
+
+    Promise.all([
+      api('/admin/support/tickets'),
+      api('/admin/support/tickets/' + encodeURIComponent(ticketId) + '/context')
+        .catch(function (e) { return { __err: e }; }),
+      api('/admin/auth/users').catch(function () { return []; }),
+    ]).then(function (res) {
+      var t = unwrap(res[0]).filter(function (x) {
+        return (x.ticketId || x.ticket_id) === ticketId;
+      })[0];
+      if (!t) {
+        view.innerHTML = '<div class="page-head"><a class="btn sm" href="#/tickets">← Tickets</a>' +
+          '<h1>Ticket</h1></div><div class="card"><div class="card-body">' +
+          empty('Ticket not found') + '</div></div>';
+        return;
+      }
+      var ctx = res[1] || {};
+      var staff = unwrap(res[2]);
+      var messages = ctx.messages || ctx.thread || [];
+
+      var bubbles = messages.length ? messages.map(function (m) {
+        var fromStaff = (m.authorKind || m.author_kind) === 'ADMIN';
+        return '<div style="display:flex;justify-content:' + (fromStaff ? 'flex-end' : 'flex-start') +
+          ';margin-bottom:10px"><div style="max-width:min(72%,560px);padding:10px 13px;' +
+          'border-radius:var(--r-md);background:' +
+          (fromStaff ? '#4c3a6b;color:#fff' : 'var(--surface-sunk)') + '">' +
+          '<div style="font-size:11.5px;opacity:.75;margin-bottom:3px">' +
+            h(fromStaff ? 'Staff' : 'Merchant') + ' · ' + h(dateTime(m.createdAt || m.created_at)) + '</div>' +
+          '<div style="white-space:pre-wrap">' + h(m.body || '') + '</div></div></div>';
+      }).join('') : (ctx.__err
+        ? '<div class="banner warn"><div>Conversation unavailable: ' + h(ctx.__err.message) + '</div></div>'
+        : empty('No messages'));
+
+      var version = t.version || 1;
+      var states = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
+
+      view.innerHTML =
+        '<div class="page-head"><a class="btn sm" href="#/tickets">← Tickets</a>' +
+          '<h1>' + h(t.subject || 'Ticket') + '</h1>' + badge(t.state) + badge(t.priority) + '</div>' +
+        '<div class="stack">' +
+          '<div class="card"><div class="card-body">' +
+            '<dl class="kv">' +
+              '<dt>Ticket</dt><dd class="mono">' + h(t.number || '—') + '</dd>' +
+              '<dt>Category</dt><dd>' + h(titleCase(t.category)) + '</dd>' +
+              '<dt>Store</dt><dd class="mono">' + h(String(t.shopId || t.shop_id || '').slice(0, 8)) + '</dd>' +
+              '<dt>Raised</dt><dd>' + h(dateTime(t.createdAt || t.created_at)) + '</dd>' +
+            '</dl>' +
+            '<div class="row" style="margin-top:12px">' +
+              '<select class="input" id="assignee">' +
+                '<option value="">Assign to…</option>' +
+                staff.map(function (u) {
+                  var id = u.adminId || u.admin_id;
+                  return '<option value="' + h(id) + '"' +
+                    ((t.assignedAdminId || t.assigned_admin_id) === id ? ' selected' : '') + '>' +
+                    h(u.email || id) + '</option>';
+                }).join('') +
+              '</select>' +
+              '<button class="btn sm" id="doassign">Assign</button>' +
+              '<div class="spacer" style="flex:1"></div>' +
+              states.filter(function (s) { return s !== t.state; }).map(function (s) {
+                return '<button class="btn sm" data-to="' + h(s) + '">' + h(titleCase(s)) + '</button>';
+              }).join(' ') +
+            '</div>' +
+          '</div></div>' +
+          '<div class="card"><div class="card-head"><h2>Conversation</h2></div>' +
+            '<div class="card-body">' + bubbles + '</div>' +
+            '<div class="card-body" style="border-top:1px solid var(--border)">' +
+              '<textarea class="input" id="reply" rows="3" style="width:100%;resize:vertical" ' +
+                'placeholder="Reply to the merchant…"></textarea>' +
+              '<div class="row" style="margin-top:8px"><div class="spacer" style="flex:1"></div>' +
+              '<button class="btn primary" id="sendreply">Send reply</button></div>' +
+            '</div></div>' +
+        '</div>';
+
+      function fail(e) {
+        if (e.message === 'unauthenticated') return;
+        var b = e.body || {};
+        toast(String(b.message || e.message), true);
+      }
+
+      document.getElementById('doassign').addEventListener('click', function () {
+        var v = document.getElementById('assignee').value;
+        if (!v) { toast('Pick a staff member first', true); return; }
+        api('/admin/support/tickets/' + encodeURIComponent(ticketId) + '/assign',
+          { method: 'POST', body: { assignedAdminId: v, version: version } })
+          .then(function () { toast('Assigned'); screenTicket(ticketId); }).catch(fail);
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll('[data-to]'), function (b) {
+        b.addEventListener('click', function () {
+          api('/admin/support/tickets/' + encodeURIComponent(ticketId) + '/transition',
+            { method: 'POST', body: { to: b.getAttribute('data-to'), version: version } })
+            .then(function () { toast('Moved to ' + titleCase(b.getAttribute('data-to'))); screenTicket(ticketId); })
+            .catch(fail);
+        });
+      });
+
+      document.getElementById('sendreply').addEventListener('click', function () {
+        var ta = document.getElementById('reply');
+        var text = ta.value.trim();
+        if (!text) { ta.focus(); return; }
+        var btn = document.getElementById('sendreply');
+        btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Sending';
+        api('/admin/support/tickets/' + encodeURIComponent(ticketId) + '/messages',
+          { method: 'POST', body: { body: text } })
+          .then(function () { toast('Reply sent'); screenTicket(ticketId); })
+          .catch(function (e) { btn.disabled = false; btn.textContent = 'Send reply'; fail(e); });
+      });
+    }).catch(function (e) {
+      if (e.message === 'unauthenticated') return;
+      view.innerHTML = '<div class="page-head"><h1>Ticket</h1></div>' + errorCard(e);
+    });
+  }
+
   var SCREENS = {
     '': screenOverview,
     'merchants': screenMerchants,
-    'tickets': screenTickets,
+    'tickets': function (arg) { return arg ? screenTicket(arg) : screenTickets(); },
     'monitors': screenMonitors,
     'dlq': screenDlq,
     'plans': screenPlans,

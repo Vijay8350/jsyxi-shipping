@@ -152,6 +152,7 @@
     { id: 'couriers', icon: '◈', label: 'Couriers' },
     { id: 'reports', icon: '↧', label: 'Reports' },
     { id: 'setup', icon: '✓', label: 'Setup' },
+    { id: 'support', icon: '✉', label: 'Support' },
     { id: 'settings', icon: '⚙', label: 'Settings' },
   ];
 
@@ -1654,6 +1655,189 @@
     });
   }
 
+  // ─── Support (§9.18) ──────────────────────────────────────────────────
+  var TICKET_CATEGORIES = ['COURIER_ISSUE', 'BILLING', 'BUG', 'FEATURE', 'OTHER'];
+  var TICKET_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
+
+  function screenSupport() {
+    var view = document.getElementById('view');
+    view.innerHTML = '<div class="page-head"><h1>Support</h1></div>' + loading();
+
+    api('/support/tickets').then(function (payload) {
+      var rows = unwrap(payload).length ? unwrap(payload) : (payload || []);
+      if (!Array.isArray(rows)) rows = [];
+
+      var body = rows.length
+        ? '<div class="table-wrap"><table class="data"><thead><tr>' +
+          '<th>#</th><th>Subject</th><th>Category</th><th>Priority</th><th>State</th><th>Raised</th>' +
+          '</tr></thead><tbody>' +
+          rows.map(function (t) {
+            var id = t.ticketId || t.ticket_id;
+            return '<tr>' +
+              '<td class="mono">' + h(t.number || '—') + '</td>' +
+              '<td><a class="row-link" href="#/support/' + h(id) + '">' +
+                h(t.subject || '—') + '</a></td>' +
+              '<td>' + h(titleCase(t.category)) + '</td>' +
+              '<td>' + stateBadge(t.priority) + '</td>' +
+              '<td>' + stateBadge(t.state) + '</td>' +
+              '<td class="muted">' + h(dateTime(t.createdAt || t.created_at)) + '</td>' +
+              '</tr>';
+          }).join('') + '</tbody></table></div>'
+        : empty('No tickets yet', 'Raise one and our support team will pick it up.');
+
+      view.innerHTML = '<div class="page-head"><h1>Support</h1><div class="spacer"></div>' +
+        '<button class="btn primary" id="newticket">New ticket</button></div>' +
+        '<div class="card"><div class="card-head"><h2>Your tickets</h2><div class="spacer"></div>' +
+        '<span class="muted" style="font-size:12.5px">' + num(rows.length) + '</span></div>' +
+        '<div class="card-body flush">' + body + '</div></div>';
+
+      document.getElementById('newticket').addEventListener('click', function () {
+        openNewTicket(screenSupport);
+      });
+    }).catch(function (err) {
+      if (err.message === 'unauthenticated') return;
+      view.innerHTML = '<div class="page-head"><h1>Support</h1></div>' +
+        (err.status === 403
+          ? '<div class="card"><div class="card-body">' +
+            empty('Not available for your role', 'Support needs the tickets.use permission (§10.2).') +
+            '</div></div>'
+          : errorCard(err));
+    });
+  }
+
+  function openNewTicket(onDone) {
+    var back = modal('New support ticket',
+      '<form id="tf" style="display:grid;gap:12px">' +
+        '<div><label for="tcat">Category</label>' +
+          '<select class="input" id="tcat" style="width:100%">' +
+          TICKET_CATEGORIES.map(function (c) {
+            return '<option value="' + h(c) + '">' + h(titleCase(c)) + '</option>';
+          }).join('') + '</select></div>' +
+        '<div><label for="tpri">Priority</label>' +
+          '<select class="input" id="tpri" style="width:100%">' +
+          TICKET_PRIORITIES.map(function (p) {
+            return '<option value="' + h(p) + '"' + (p === 'NORMAL' ? ' selected' : '') + '>' +
+              h(titleCase(p)) + '</option>';
+          }).join('') + '</select></div>' +
+        '<div><label for="tsub">Subject</label>' +
+          '<input class="input" id="tsub" maxlength="500" required style="width:100%" ' +
+            'placeholder="Short summary" /></div>' +
+        '<div><label for="tdesc">What happened?</label>' +
+          '<textarea class="input" id="tdesc" required rows="6" style="width:100%;resize:vertical" ' +
+            'placeholder="Include an order number or AWB if it relates to one."></textarea></div>' +
+        '<div><label for="tawb">Related AWB <span class="muted">(optional)</span></label>' +
+          '<input class="input" id="tawb" style="width:100%" placeholder="e.g. DL10007919" /></div>' +
+      '</form>',
+      '<span id="tmsg" class="muted"></span><div class="spacer"></div>' +
+      '<button class="btn" data-close>Cancel</button>' +
+      '<button class="btn primary" id="tsend">Raise ticket</button>');
+
+    back.querySelector('#tsend').addEventListener('click', function () {
+      var form = back.querySelector('#tf');
+      if (!form.reportValidity()) return;
+      var btn = back.querySelector('#tsend');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span> Sending';
+
+      var body = {
+        category: back.querySelector('#tcat').value,
+        priority: back.querySelector('#tpri').value,
+        subject: back.querySelector('#tsub').value.trim(),
+        description: back.querySelector('#tdesc').value.trim(),
+      };
+      // Only send the link when given — an empty string would fail validation.
+      var awb = back.querySelector('#tawb').value.trim();
+      if (awb) body.linkedAwb = awb;
+
+      api('/support/tickets', { method: 'POST', body: body }).then(function (t) {
+        closeModal();
+        toast('Ticket raised' + (t && t.number ? ' · ' + t.number : ''));
+        if (onDone) onDone();
+      }).catch(function (err) {
+        if (err.message === 'unauthenticated') return;
+        btn.disabled = false;
+        btn.textContent = 'Raise ticket';
+        var b = err.body || {};
+        var msg = Array.isArray(b.message) ? b.message.join(' · ') : (b.message || err.message);
+        back.querySelector('#tmsg').innerHTML =
+          '<span style="color:var(--bad-fg)">' + h(String(msg)) + '</span>';
+      });
+    });
+  }
+
+  /** The conversation. Merchants reply here until the ticket is closed. */
+  function screenTicketThread(ticketId) {
+    var view = document.getElementById('view');
+    view.innerHTML = '<div class="page-head"><h1>Ticket</h1></div>' + loading();
+
+    api('/support/tickets/' + encodeURIComponent(ticketId)).then(function (d) {
+      var t = d.ticket || d;
+      var messages = d.messages || d.thread || [];
+
+      var bubbles = messages.length ? messages.map(function (m) {
+        var mine = (m.authorKind || m.author_kind) === 'MEMBER';
+        return '<div style="display:flex;justify-content:' + (mine ? 'flex-end' : 'flex-start') + ';margin-bottom:10px">' +
+          '<div style="max-width:min(72%,560px);padding:10px 13px;border-radius:var(--r-md);' +
+            'background:' + (mine ? 'var(--petrol-700);color:#fff' : 'var(--surface-sunk)') + '">' +
+            '<div style="font-size:11.5px;opacity:.75;margin-bottom:3px">' +
+              h(mine ? 'You' : 'Jsyxi support') + ' · ' +
+              h(dateTime(m.createdAt || m.created_at)) + '</div>' +
+            '<div style="white-space:pre-wrap">' + h(m.body || '') + '</div>' +
+          '</div></div>';
+      }).join('') : empty('No messages');
+
+      // §3.16: a CLOSED ticket is not a conversation any more.
+      var closed = t.state === 'CLOSED';
+
+      view.innerHTML =
+        '<div class="page-head"><a class="btn sm" href="#/support">← Support</a>' +
+          '<h1>' + h(t.subject || 'Ticket') + '</h1>' + stateBadge(t.state) + stateBadge(t.priority) +
+        '</div>' +
+        '<div class="stack">' +
+          '<div class="card"><div class="card-body"><dl class="kv">' +
+            '<dt>Ticket</dt><dd class="mono">' + h(t.number || '—') + '</dd>' +
+            '<dt>Category</dt><dd>' + h(titleCase(t.category)) + '</dd>' +
+            '<dt>Raised</dt><dd>' + h(dateTime(t.createdAt || t.created_at)) + '</dd>' +
+            (t.linkedAwb || t.linked_awb
+              ? '<dt>Related AWB</dt><dd class="mono">' + h(t.linkedAwb || t.linked_awb) + '</dd>' : '') +
+          '</dl></div></div>' +
+          '<div class="card"><div class="card-head"><h2>Conversation</h2></div>' +
+            '<div class="card-body">' + bubbles + '</div>' +
+            (closed
+              ? '<div class="pager"><span class="muted">This ticket is closed.</span></div>'
+              : '<div class="card-body" style="border-top:1px solid var(--border)">' +
+                '<textarea class="input" id="reply" rows="3" style="width:100%;resize:vertical" ' +
+                  'placeholder="Write a reply…"></textarea>' +
+                '<div class="row" style="margin-top:8px"><div class="spacer" style="flex:1"></div>' +
+                '<button class="btn primary" id="sendreply">Send reply</button></div>' +
+                '</div>') +
+          '</div>' +
+        '</div>';
+
+      var send = document.getElementById('sendreply');
+      if (send) send.addEventListener('click', function () {
+        var ta = document.getElementById('reply');
+        var text = ta.value.trim();
+        if (!text) { ta.focus(); return; }
+        send.disabled = true;
+        send.innerHTML = '<span class="spin"></span> Sending';
+        api('/support/tickets/' + encodeURIComponent(ticketId) + '/messages',
+          { method: 'POST', body: { body: text } })
+          .then(function () { toast('Reply sent'); screenTicketThread(ticketId); })
+          .catch(function (err) {
+            if (err.message === 'unauthenticated') return;
+            send.disabled = false; send.textContent = 'Send reply';
+            var b = err.body || {};
+            toast(String(b.message || err.message), true);
+          });
+      });
+    }).catch(function (err) {
+      if (err.message === 'unauthenticated') return;
+      view.innerHTML = '<div class="page-head"><a class="btn sm" href="#/support">← Support</a>' +
+        '<h1>Ticket</h1></div>' + errorCard(err);
+    });
+  }
+
   // ─── Router ───────────────────────────────────────────────────────────
   var ROUTES = {
     '': screenDashboard,
@@ -1669,6 +1853,7 @@
     'couriers': screenCouriers,
     'reports': screenReports,
     'setup': screenSetup,
+    'support': function (arg) { return arg ? screenTicketThread(arg) : screenSupport(); },
     'settings': screenSettings,
   };
 
