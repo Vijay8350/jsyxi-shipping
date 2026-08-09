@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>Jsyxi Shipping</title>
+<!--
+  §9.22 locks Space Grotesk + Inter. Loaded from Google Fonts with a full
+  system fallback stack, so the console stays legible if the request is blocked
+  or offline. Self-hosting these is the hardening step — it removes a
+  third-party request from a surface that renders buyer data.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap"
+  rel="stylesheet" />
+<link rel="stylesheet" href="/app/app.css" />
+</head>
+<body>
+  <div id="root">
+    <div style="display:grid;place-items:center;min-height:100vh">
+      <span class="spin" aria-label="Loading"></span>
+    </div>
+  </div>
+  <div class="toast-host" id="toasts" aria-live="polite"></div>
+  <script src="/app/app.js"></script>
+</body>
+</html>

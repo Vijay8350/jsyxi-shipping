@@ -40,6 +40,7 @@ import { BillingModule } from './modules/billing/billing.module';
 import { HealthModule } from './modules/health/health.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { OpsModule } from './ops/ops.module';
+import { OrdersModule } from './modules/orders/orders.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { OpsModule } from './ops/ops.module';
     HealthModule,
     MaintenanceModule,
     OpsModule,
+    OrdersModule,
   ],
 })
 export class AppModule {}

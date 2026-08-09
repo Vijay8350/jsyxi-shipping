@@ -5,7 +5,7 @@
   "description": "Jsyxi Shipping — Shopify shipping app for the Indian market (spec.md build authority)",
   "license": "UNLICENSED",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/modules/platform/locales','dist/modules/platform/locales',{recursive:true})\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"const{cpSync}=require('fs');cpSync('src/modules/platform/locales','dist/modules/platform/locales',{recursive:true});cpSync('src/ui/public','dist/ui/public',{recursive:true})\"",
     "start": "node dist/main.js",
     "start:dev": "tsx watch src/main.ts",
     "migrate": "node-pg-migrate up",

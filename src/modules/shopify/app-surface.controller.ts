@@ -1,7 +1,5 @@
-import { Controller, Get, Inject, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { Pool } from 'pg';
-import { PG_POOL } from '../../database/database.module';
 import { SessionService } from '../../auth/session.service';
 import { SESSION_COOKIE, SessionContext } from '../../auth/session.types';
 
@@ -23,10 +21,7 @@ import { SESSION_COOKIE, SessionContext } from '../../auth/session.types';
  */
 @Controller()
 export class AppSurfaceController {
-  constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
-    private readonly sessions: SessionService,
-  ) {}
+  constructor(private readonly sessions: SessionService) {}
 
   @Get()
   async home(
@@ -42,7 +37,13 @@ export class AppSurfaceController {
       return;
     }
 
-    res.type('html').send(session ? await this.connectedPage(session) : installPage());
+    // With a session, '/' is just the door to the console (§9.22).
+    if (session) {
+      res.redirect('/app/');
+      return;
+    }
+
+    res.type('html').send(installPage());
   }
 
   @Get('entry')
@@ -56,29 +57,6 @@ export class AppSurfaceController {
     return this.sessions.resolve(token);
   }
 
-  private async connectedPage(session: SessionContext): Promise<string> {
-    const { rows } = await this.pool.query<{
-      myshopify_domain: string;
-      account_state: string;
-    }>(
-      `SELECT myshopify_domain, account_state FROM shop WHERE shop_id = $1`,
-      [session.shopId],
-    );
-    const shop = rows[0];
-    return page(
-      'Jsyxi Shipping',
-      `<h1>Connected</h1>
-       <p class="lede">This store is linked to Jsyxi Shipping.</p>
-       <dl>
-         <dt>Store</dt><dd>${escapeHtml(shop?.myshopify_domain ?? 'unknown')}</dd>
-         <dt>Account state</dt><dd>${escapeHtml(shop?.account_state ?? 'unknown')}</dd>
-         <dt>Your role</dt><dd>${escapeHtml(session.role)}</dd>
-         <dt>Signed in via</dt><dd>${escapeHtml(session.authSource)}</dd>
-       </dl>
-       <p class="note">The merchant console is served by the JSON API on this
-       host. Your session cookie authenticates it.</p>`,
-    );
-  }
 }
 
 function installPage(): string {
@@ -131,7 +109,7 @@ const ENTRY_PAGE = page(
          return res.json().then(function (body) { return { status: res.status, body: body }; });
        }).then(function (r) {
          if (r.status === 200) {
-           window.location.replace('/');
+           window.location.replace('/app/');
            return;
          }
          if (r.status === 403 && r.body && r.body.status === 'NO_ACCESS') {
