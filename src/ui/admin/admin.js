@@ -220,6 +220,7 @@
     { id: '', icon: '◧', label: 'Overview' },
     { id: 'merchants', icon: '▤', label: 'Merchants' },
     { id: 'tickets', icon: '✉', label: 'Support tickets' },
+    { id: 'announcements', icon: '📢', label: 'Announcements' },
     { section: 'Operations' },
     { id: 'monitors', icon: '⚠', label: 'Monitors' },
     { id: 'dlq', icon: '⟲', label: 'Dead letters' },
@@ -358,25 +359,30 @@
       var rows = unwrap(payload);
       var body = rows.length
         ? '<div class="table-wrap"><table class="data"><thead><tr>' +
-          '<th>Store</th><th>Account</th><th>Plan</th><th class="num">AWBs this cycle</th>' +
-          '<th>Couriers</th><th class="num">Setup issues</th><th>Installed</th>' +
+          '<th>Store</th><th>Account</th><th>Plan</th><th class="num">Orders</th>' +
+          '<th class="num">Last 7d</th><th class="num">AWBs cycle</th><th>Couriers</th>' +
+          '<th class="num">Failed</th><th class="num">Setup</th>' +
           '</tr></thead><tbody>' +
           rows.map(function (m) {
             var domain = m.myshopifyDomain || m.myshopify_domain || m.domain || '—';
-            var broken = Number(m.brokenItems || m.broken_items || 0);
+            var broken = Number(m.broken_health_count || m.brokenHealthCount || 0);
             var couriers = m.courierCount !== undefined ? m.courierCount : m.courier_count;
             var unhealthy = Number(m.unhealthyCourierCount || m.unhealthy_courier_count || 0);
+            var failed = Number(m.failed_booking_count || m.failedBookingCount || 0);
             return '<tr>' +
               '<td><strong>' + h(domain) + '</strong></td>' +
               '<td>' + badge(m.accountState || m.account_state) +
                 ' ' + badge(m.subscriptionState || m.subscription_state) + '</td>' +
               '<td>' + h(m.planCode || m.plan_code || '—') + '</td>' +
-              '<td class="num">' + num(m.awbsThisCycle !== undefined ? m.awbsThisCycle : m.awbs_this_cycle) + '</td>' +
+              '<td class="num">' + num(m.order_count !== undefined ? m.order_count : m.orderCount) + '</td>' +
+              '<td class="num">' + num(m.orders_last_7d !== undefined ? m.orders_last_7d : m.ordersLast7d) + '</td>' +
+              '<td class="num">' + num(m.awb_used_this_cycle !== undefined ? m.awb_used_this_cycle : m.awbUsedThisCycle) + '</td>' +
               '<td>' + num(couriers) +
                 (unhealthy > 0 ? ' <span class="badge bad">' + num(unhealthy) + ' unhealthy</span>' : '') + '</td>' +
+              '<td class="num">' + (failed > 0
+                ? '<span class="badge bad">' + num(failed) + '</span>' : '<span class="muted">0</span>') + '</td>' +
               '<td class="num">' + (broken > 0
                 ? '<span class="badge warn">' + num(broken) + '</span>' : '<span class="muted">0</span>') + '</td>' +
-              '<td class="muted">' + h(dateTime(m.installedAt || m.installed_at)) + '</td>' +
               '</tr>';
           }).join('') + '</tbody></table></div>'
         : empty('No merchants yet', 'Stores appear here as soon as they install the app.');
@@ -686,10 +692,184 @@
     });
   }
 
+  /**
+   * §9.19 announcements — the push to merchants. Type decides reach:
+   * WARNING emails every member on publish (A2-09); INFO and UPDATE are in-app
+   * only. Audience decides who: everyone, a plan, or named shops.
+   */
+  function screenAnnouncements() {
+    var view = document.getElementById('view');
+    view.innerHTML = '<div class="page-head"><h1>Announcements</h1></div>' + loading();
+
+    Promise.all([
+      api('/admin/support/announcements'),
+      api('/admin/merchants').catch(function () { return []; }),
+    ]).then(function (res) {
+      var rows = unwrap(res[0]);
+      var merchants = unwrap(res[1]);
+
+      var body = rows.length
+        ? '<div class="table-wrap"><table class="data"><thead><tr>' +
+          '<th>Title</th><th>Type</th><th>Audience</th><th>State</th><th>Published</th><th></th>' +
+          '</tr></thead><tbody>' +
+          rows.map(function (a) {
+            var id = a.announcementId || a.announcement_id;
+            var published = a.publishedAt || a.published_at;
+            var expired = a.expiresAt || a.expires_at;
+            var state = expired && new Date(expired) < new Date() ? 'EXPIRED'
+                      : published ? 'PUBLISHED' : 'DRAFT';
+            return '<tr>' +
+              '<td><strong>' + h(a.title || '—') + '</strong></td>' +
+              '<td>' + badge(a.type) + '</td>' +
+              '<td>' + h(titleCase(a.audienceKind || a.audience_kind || 'ALL')) + '</td>' +
+              '<td>' + badge(state) + '</td>' +
+              '<td class="muted">' + h(published ? dateTime(published) : '—') + '</td>' +
+              '<td style="text-align:right">' +
+                (state === 'DRAFT'
+                  ? '<button class="btn sm primary" data-pub="' + h(id) + '">Publish</button>'
+                  : state === 'PUBLISHED'
+                    ? '<button class="btn sm" data-exp="' + h(id) + '">Expire</button>' : '') +
+              '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : empty('No announcements', 'Compose one to notify merchants.');
+
+      view.innerHTML = '<div class="page-head"><h1>Announcements</h1>' +
+        '<span class="muted">Notify merchants in-app, or by email for warnings</span>' +
+        '<div class="spacer"></div><button class="btn primary" id="compose">New announcement</button></div>' +
+        '<div class="card"><div class="card-head"><h2>Sent</h2><div class="spacer"></div>' +
+        '<span class="muted" style="font-size:12.5px">' + num(rows.length) + '</span></div>' +
+        '<div class="card-body flush">' + body + '</div></div>';
+
+      document.getElementById('compose').addEventListener('click', function () {
+        openCompose(merchants, screenAnnouncements);
+      });
+
+      function act(sel, path, label) {
+        Array.prototype.forEach.call(document.querySelectorAll('[' + sel + ']'), function (b) {
+          b.addEventListener('click', function () {
+            var id = b.getAttribute(sel);
+            b.disabled = true;
+            api('/admin/support/announcements/' + encodeURIComponent(id) + '/' + path,
+              { method: 'POST', body: {} })
+              .then(function () { toast(label); screenAnnouncements(); })
+              .catch(function (e) {
+                b.disabled = false;
+                if (e.message === 'unauthenticated') return;
+                toast(String((e.body && e.body.message) || e.message), true);
+              });
+          });
+        });
+      }
+      act('data-pub', 'publish', 'Announcement published');
+      act('data-exp', 'expire', 'Announcement expired');
+    }).catch(function (e) {
+      if (e.message === 'unauthenticated') return;
+      view.innerHTML = '<div class="page-head"><h1>Announcements</h1></div>' + errorCard(e);
+    });
+  }
+
+  function openCompose(merchants, onDone) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true">' +
+        '<div class="modal-head"><h2>New announcement</h2><div class="spacer"></div>' +
+          '<button class="x" data-close>×</button></div>' +
+        '<div class="modal-body">' +
+          '<form id="af" style="display:grid;gap:12px">' +
+            '<div><label for="atype">Type</label>' +
+              '<select class="input" id="atype" style="width:100%">' +
+                '<option value="INFO">Info — in-app only</option>' +
+                '<option value="UPDATE">Update — in-app only</option>' +
+                '<option value="WARNING">Warning — in-app AND emails every member</option>' +
+              '</select></div>' +
+            '<div><label for="aaud">Audience</label>' +
+              '<select class="input" id="aaud" style="width:100%">' +
+                '<option value="ALL">All merchants</option>' +
+                '<option value="BY_PLAN">Merchants on a plan</option>' +
+                '<option value="SPECIFIC_SHOPS">Specific merchants</option>' +
+              '</select></div>' +
+            '<div id="audextra"></div>' +
+            '<div><label for="atitle">Title</label>' +
+              '<input class="input" id="atitle" maxlength="500" required style="width:100%" /></div>' +
+            '<div><label for="abody">Message</label>' +
+              '<textarea class="input" id="abody" rows="5" required style="width:100%;resize:vertical"></textarea></div>' +
+          '</form>' +
+          /* Publishing is the moment it reaches merchants, so composing and
+             sending are separate actions — a typo in a WARNING would email
+             every member of every store. */
+          '<p class="note">Composing creates a draft. It reaches merchants only when you publish it.</p>' +
+        '</div>' +
+        '<div class="modal-foot"><span id="amsg" class="muted"></span><div class="spacer"></div>' +
+          '<button class="btn" data-close>Cancel</button>' +
+          '<button class="btn primary" id="asave">Create draft</button></div>' +
+      '</div>';
+    document.body.appendChild(back);
+    back.addEventListener('click', function (e) {
+      if (e.target === back || e.target.hasAttribute('data-close')) back.remove();
+    });
+
+    var aud = back.querySelector('#aaud');
+    var extra = back.querySelector('#audextra');
+    aud.addEventListener('change', function () {
+      if (aud.value === 'BY_PLAN') {
+        extra.innerHTML = '<label for="aplan">Plan code</label>' +
+          '<input class="input" id="aplan" style="width:100%" placeholder="e.g. TRIAL" />';
+      } else if (aud.value === 'SPECIFIC_SHOPS') {
+        extra.innerHTML = '<label for="ashops">Merchants</label>' +
+          '<select class="input" id="ashops" multiple size="6" style="width:100%">' +
+          merchants.map(function (m) {
+            var id = m.shopId || m.shop_id;
+            return '<option value="' + h(id) + '">' +
+              h(m.myshopifyDomain || m.myshopify_domain || id) + '</option>';
+          }).join('') + '</select>' +
+          '<span class="note">Ctrl/Cmd-click to select more than one.</span>';
+      } else {
+        extra.innerHTML = '';
+      }
+    });
+
+    back.querySelector('#asave').addEventListener('click', function () {
+      var form = back.querySelector('#af');
+      if (!form.reportValidity()) return;
+      var btn = back.querySelector('#asave');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span> Creating';
+
+      var body = {
+        type: back.querySelector('#atype').value,
+        audienceKind: aud.value,
+        title: back.querySelector('#atitle').value.trim(),
+        body: back.querySelector('#abody').value.trim(),
+      };
+      // §3.29: audienceRef must be null for ALL, and shaped per kind otherwise.
+      if (aud.value === 'BY_PLAN') {
+        body.audienceRef = { planCode: (back.querySelector('#aplan') || {}).value || '' };
+      } else if (aud.value === 'SPECIFIC_SHOPS') {
+        var sel = back.querySelector('#ashops');
+        body.audienceRef = {
+          shopIds: sel ? Array.prototype.slice.call(sel.selectedOptions).map(function (o) { return o.value; }) : [],
+        };
+      }
+
+      api('/admin/support/announcements', { method: 'POST', body: body })
+        .then(function () { back.remove(); toast('Draft created — publish it to send'); if (onDone) onDone(); })
+        .catch(function (e) {
+          if (e.message === 'unauthenticated') return;
+          btn.disabled = false; btn.textContent = 'Create draft';
+          var b = e.body || {};
+          var msg = Array.isArray(b.message) ? b.message.join(' · ') : (b.message || e.message);
+          back.querySelector('#amsg').innerHTML =
+            '<span style="color:var(--bad-fg)">' + h(String(msg)) + '</span>';
+        });
+    });
+  }
+
   var SCREENS = {
     '': screenOverview,
     'merchants': screenMerchants,
     'tickets': function (arg) { return arg ? screenTicket(arg) : screenTickets(); },
+    'announcements': screenAnnouncements,
     'monitors': screenMonitors,
     'dlq': screenDlq,
     'plans': screenPlans,

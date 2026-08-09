@@ -51,7 +51,11 @@ export class MerchantDirectoryService {
               COALESCE(usage.awb_used, 0)::int AS awb_used_this_cycle,
               COALESCE(couriers.courier_count, 0)::int AS courier_count,
               COALESCE(couriers.unhealthy_count, 0)::int AS unhealthy_courier_count,
-              COALESCE(health.broken_health_count, 0)::int AS broken_health_count
+              COALESCE(health.broken_health_count, 0)::int AS broken_health_count,
+              COALESCE(vol.order_count, 0)::int AS order_count,
+              COALESCE(vol.orders_7d, 0)::int AS orders_last_7d,
+              COALESCE(vol.shipment_count, 0)::int AS shipment_count,
+              COALESCE(vol.failed_bookings, 0)::int AS failed_booking_count
          FROM shop s
          LEFT JOIN LATERAL (
            SELECT sub.plan_id, sub.state, sub.cycle_start_at, sub.cycle_end_at
@@ -69,6 +73,25 @@ export class MerchantDirectoryService {
               AND sub.cycle_start_at IS NOT NULL
               AND l.cycle_start_at = sub.cycle_start_at
          ) usage ON true
+         LEFT JOIN LATERAL (
+           -- Volume and trouble per merchant: lifetime orders, the last 7 days
+           -- so a stalled store is visible next to a busy one, shipments, and
+           -- failed bookings — the signal that a merchant is stuck rather than
+           -- merely quiet. Test rows are excluded (INV-19); a staff view that
+           -- counted test parcels would misreport every merchant's real volume.
+           SELECT count(DISTINCT o.order_id) AS order_count,
+                  count(DISTINCT o.order_id) FILTER (
+                    WHERE o.created_at >= now() - interval '7 days') AS orders_7d,
+                  count(DISTINCT sh.shipment_id) AS shipment_count,
+                  count(DISTINCT sh.shipment_id) FILTER (
+                    WHERE sh.booking_state = 'FAILED') AS failed_bookings
+             FROM "order" o
+             LEFT JOIN shipment sh
+                    ON sh.shop_id = o.shop_id AND sh.order_id = o.order_id
+                   AND sh.is_test = false
+            WHERE o.shop_id = s.shop_id
+              AND o.is_test_order = false
+         ) vol ON true
          LEFT JOIN LATERAL (
            SELECT count(*) AS courier_count,
                   count(*) FILTER (WHERE ca.health_state <> 'HEALTHY') AS unhealthy_count
