@@ -18,7 +18,10 @@ describe('Shadowfax seed data', () => {
       kind: 'DIRECT',
       authPattern: 'KEY_PASTE',
     });
-    expect(SHADOWFAX_SEED.credentialFields).toHaveLength(1);
+    // pickup_code is appended by the shared credential schema and asserted in
+    // test/courier-framework/registered-pickup-code.spec.ts; these assertions
+    // therefore scope themselves to the courier's own secret credentials.
+    expect(SHADOWFAX_SEED.credentialFields.filter((f) => f.isSecret)).toHaveLength(1);
     expect(SHADOWFAX_SEED.credentialFields[0]).toMatchObject({
       key: 'api_key',
       isSecret: true,

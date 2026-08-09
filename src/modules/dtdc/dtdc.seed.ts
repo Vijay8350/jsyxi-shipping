@@ -57,6 +57,20 @@ export const DTDC_SEED = {
       validationRegex: null as string | null,
       displayOrder: 1,
     },
+      {
+      // The merchant's courier-registered pickup identity. NOT a secret — it
+      // is an account reference, and masking it would only stop the merchant
+      // checking what they typed. Optional so an existing account keeps
+      // working; when unset the adapter falls back to the internal id, which
+      // is the pre-existing (wrong) behaviour rather than a new failure.
+      key: 'pickup_code',
+      label: 'Customer code',
+      type: 'text',
+      isSecret: false,
+      isRequired: false,
+      validationRegex: null as string | null,
+      displayOrder: 2,
+    },
   ],
   /**
    * §8.2 capabilities: DTDC implements 7 of the 8 adapter methods.

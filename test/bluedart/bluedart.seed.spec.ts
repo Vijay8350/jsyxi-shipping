@@ -15,14 +15,17 @@ describe('Blue Dart seed data', () => {
       kind: 'DIRECT',
       authPattern: 'KEY_PASTE',
     });
-    expect(BLUEDART_SEED.credentialFields).toHaveLength(2);
-    for (const f of BLUEDART_SEED.credentialFields) {
-      expect(f.isSecret).toBe(true);
+        // pickup_code (the merchant's courier-registered pickup identity) is
+    // appended by the shared credential schema and asserted in
+    // test/courier-framework/registered-pickup-code.spec.ts.
+    expect(BLUEDART_SEED.credentialFields.filter((f) => f.isSecret)).toHaveLength(2);
+    for (const f of BLUEDART_SEED.credentialFields.filter((x) => x.isSecret)) {
       expect(f.isRequired).toBe(true);
     }
     expect(BLUEDART_SEED.credentialFields.map((f) => f.key)).toEqual([
       'client_id',
       'client_secret',
+      'pickup_code',
     ]);
   });
 

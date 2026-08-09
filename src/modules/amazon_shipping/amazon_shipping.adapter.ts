@@ -121,6 +121,8 @@ export const AMAZON_SHIPPING_NDR_FALLBACK_NOTE =
 
 export interface AmazonShippingAdapterOptions {
   courierAccountId: string;
+  /** Merchant's courier-registered pickup/customer code (optional). */
+  pickupCode?: string;
   courierCode?: string;
   mode: CourierAccountMode;
   /** Plaintext LWA credentials, confined to this instance (§5.7 control 1,
@@ -157,6 +159,7 @@ export class AmazonShippingAdapter implements CourierAdapter {
   readonly requestLog: AmazonShippingCallRecord[] = [];
 
   private readonly courierAccountId: string;
+  private readonly pickupCode?: string;
   private readonly baseUrl: string;
   private readonly tokenUrl: string;
   private readonly refreshToken: string;
@@ -176,6 +179,7 @@ export class AmazonShippingAdapter implements CourierAdapter {
   constructor(options: AmazonShippingAdapterOptions) {
     this.courierCode = options.courierCode ?? AMAZON_SHIPPING_COURIER_CODE;
     this.courierAccountId = options.courierAccountId;
+    this.pickupCode = options.pickupCode;
     this.baseUrl =
       options.baseUrlOverride ??
       AMAZON_SHIPPING_BASE_URLS[options.mode] ??
@@ -442,6 +446,7 @@ export class AmazonShippingAdapter implements CourierAdapter {
         body: buildCreateShipmentBody({
           merchantReference: intent.merchantReference,
           pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
           recipient: request.recipient,
           paymentMode: request.paymentMode,
           collectible: request.collectible,
@@ -626,6 +631,10 @@ export const createAmazonShippingAdapterFactory =
     }
     return new AmazonShippingAdapter({
       courierAccountId: ctx.courierAccountId,
+      pickupCode:
+        typeof ctx.credentials.pickup_code === 'string' && ctx.credentials.pickup_code
+          ? ctx.credentials.pickup_code
+          : undefined,
       courierCode: ctx.courierCode,
       mode: ctx.mode,
       refreshToken: ctx.credentials.refresh_token,

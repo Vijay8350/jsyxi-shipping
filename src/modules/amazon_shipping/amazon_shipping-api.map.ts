@@ -279,6 +279,9 @@ export interface CreatePayloadInput {
   /** §9.5.4 stable merchant reference → clientReferenceId. */
   merchantReference: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   recipient: {
     name: string;
     addressLines: string[];
@@ -321,7 +324,7 @@ export function buildCreateShipmentBody(input: CreatePayloadInput): string {
   return JSON.stringify({
     clientReferenceId: input.merchantReference, // §9.5.4
     channelDetails: { channelType: 'EXTERNAL' },
-    shipFrom: { addressId: input.pickupLocationId },
+    shipFrom: { addressId: (input.registeredPickupCode || input.pickupLocationId) },
     shipTo: {
       name: input.recipient.name,
       addressLine1: input.recipient.addressLines[0] ?? '',

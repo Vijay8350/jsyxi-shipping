@@ -19,13 +19,19 @@ describe('Amazon Shipping seed data', () => {
       kind: 'DIRECT',
       authPattern: 'OAUTH',
     });
-    expect(AMAZON_SHIPPING_SEED.credentialFields).toHaveLength(3);
+    // pickup_code is appended by the shared credential schema and asserted in
+    // test/courier-framework/registered-pickup-code.spec.ts; these assertions
+    // therefore scope themselves to the courier's own secret credentials.
+    expect(AMAZON_SHIPPING_SEED.credentialFields).toHaveLength(4);
     expect(AMAZON_SHIPPING_SEED.credentialFields.map((f) => f.key)).toEqual([
       'refresh_token',
       'client_id',
       'client_secret',
+      'pickup_code',
     ]);
     for (const f of AMAZON_SHIPPING_SEED.credentialFields) {
+      // pickup_code is optional so already-connected accounts keep working.
+      if (f.key === 'pickup_code') continue;
       expect(f.isRequired).toBe(true);
     }
     // §5.7 control 3: refresh_token and client_secret are secrets;
@@ -37,6 +43,8 @@ describe('Amazon Shipping seed data', () => {
       refresh_token: true,
       client_id: false,
       client_secret: true,
+      // The ship-from address id is an account reference, not a credential.
+      pickup_code: false,
     });
   });
 

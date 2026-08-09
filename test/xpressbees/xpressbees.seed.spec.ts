@@ -18,10 +18,16 @@ describe('Xpressbees seed data', () => {
       kind: 'DIRECT',
       authPattern: 'KEY_PASTE',
     });
-    expect(XPRESSBEES_SEED.credentialFields).toHaveLength(2);
-    expect(XPRESSBEES_SEED.credentialFields.map((f) => f.key)).toEqual(['email', 'password']);
-    for (const f of XPRESSBEES_SEED.credentialFields) {
-      expect(f.isSecret).toBe(true);
+    // pickup_code is appended by the shared credential schema and asserted in
+    // test/courier-framework/registered-pickup-code.spec.ts; these assertions
+    // therefore scope themselves to the courier's own secret credentials.
+    expect(XPRESSBEES_SEED.credentialFields.filter((f) => f.isSecret)).toHaveLength(2);
+    expect(XPRESSBEES_SEED.credentialFields.map((f) => f.key)).toEqual([
+      'email',
+      'password',
+      'pickup_code',
+    ]);
+    for (const f of XPRESSBEES_SEED.credentialFields.filter((x) => x.isSecret)) {
       expect(f.isRequired).toBe(true);
     }
   });

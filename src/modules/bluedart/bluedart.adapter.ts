@@ -120,6 +120,8 @@ export function createInMemoryTokenCache(): BluedartTokenCache {
 
 export interface BluedartAdapterOptions {
   courierAccountId: string;
+  /** Merchant's courier-registered pickup/customer code (optional). */
+  pickupCode?: string;
   courierCode?: string;
   mode: CourierAccountMode;
   /** Plaintext client_id/client_secret, confined to this instance (§5.7
@@ -165,6 +167,7 @@ export class BluedartAdapter implements CourierAdapter {
   private readonly tokenCache: BluedartTokenCache;
   private readonly tokenCacheKey: string;
   private readonly now: () => Date;
+  private readonly pickupCode?: string;
   private readonly fetchFn: typeof fetch;
   /** INV-5: intent → the outcome of the one create issued for it. */
   private readonly createsByIntent = new Map<string, CreateShipmentResult>();
@@ -180,6 +183,7 @@ export class BluedartAdapter implements CourierAdapter {
     this.tokenCache = options.tokenCache;
     this.tokenCacheKey = `bluedart:token:${options.courierAccountId}:${options.mode}`;
     this.now = options.now;
+    this.pickupCode = options.pickupCode;
     this.fetchFn = options.fetchFn ?? fetch;
   }
 
@@ -429,6 +433,7 @@ export class BluedartAdapter implements CourierAdapter {
         body: buildCreateShipmentBody({
           merchantReference: intent.merchantReference,
           pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
           recipient: request.recipient,
           paymentMode: request.paymentMode,
           collectible: request.collectible,
@@ -560,6 +565,7 @@ export class BluedartAdapter implements CourierAdapter {
     const body = await this.call('schedulePickup', BLUEDART_ENDPOINTS.pickup, {
       body: buildPickupBody({
         pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
         awbs: request.awbs,
         pickupDate: request.pickupDate,
       }),
@@ -603,6 +609,10 @@ export const createBluedartAdapterFactory =
     }
     return new BluedartAdapter({
       courierAccountId: ctx.courierAccountId,
+      pickupCode:
+        typeof ctx.credentials.pickup_code === 'string' && ctx.credentials.pickup_code
+          ? ctx.credentials.pickup_code
+          : undefined,
       courierCode: ctx.courierCode,
       mode: ctx.mode,
       clientId: ctx.credentials.client_id,

@@ -92,6 +92,8 @@ const GETQUOTE_FALLBACK_NOTE =
 
 export interface ShadowfaxAdapterOptions {
   courierAccountId: string;
+  /** Merchant's courier-registered pickup/customer code (optional). */
+  pickupCode?: string;
   courierCode?: string;
   mode: CourierAccountMode;
   /** Plaintext api_key, confined to this instance (§5.7 control 1,
@@ -125,6 +127,7 @@ export class ShadowfaxAdapter implements CourierAdapter {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly now: () => Date;
+  private readonly pickupCode?: string;
   private readonly fetchFn: typeof fetch;
   /** INV-5: intent → the outcome of the one create issued for it. */
   private readonly createsByIntent = new Map<string, CreateShipmentResult>();
@@ -135,6 +138,7 @@ export class ShadowfaxAdapter implements CourierAdapter {
       options.baseUrlOverride ?? SHADOWFAX_BASE_URLS[options.mode] ?? SHADOWFAX_BASE_URLS.LIVE;
     this.apiKey = options.apiKey;
     this.now = options.now;
+    this.pickupCode = options.pickupCode;
     this.fetchFn = options.fetchFn ?? fetch;
   }
 
@@ -262,6 +266,7 @@ export class ShadowfaxAdapter implements CourierAdapter {
         body: buildCreateShipmentBody({
           merchantReference: intent.merchantReference,
           pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
           recipient: request.recipient,
           paymentMode: request.paymentMode,
           collectible: request.collectible,
@@ -396,6 +401,7 @@ export class ShadowfaxAdapter implements CourierAdapter {
       body: buildPickupBody({
         awbs: request.awbs,
         pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
         pickupDate: request.pickupDate,
       }),
     });
@@ -434,6 +440,10 @@ export const shadowfaxAdapterFactory: AdapterFactory = (ctx: AdapterBuildContext
   }
   return new ShadowfaxAdapter({
     courierAccountId: ctx.courierAccountId,
+      pickupCode:
+        typeof ctx.credentials.pickup_code === 'string' && ctx.credentials.pickup_code
+          ? ctx.credentials.pickup_code
+          : undefined,
     courierCode: ctx.courierCode,
     mode: ctx.mode,
     apiKey,

@@ -352,6 +352,9 @@ export function parseQuoteChargesResponse(body: unknown): ParsedQuoteCharges {
 export interface CreateBodyInput {
   merchantReference: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   originPincode: string;
   recipient: {
     name: string;
@@ -384,7 +387,7 @@ export interface CreateBodyInput {
 export function buildCreateShipmentBody(input: CreateBodyInput): string {
   return JSON.stringify({
     customer_reference_number: input.merchantReference, // §9.5.4 stable merchant reference
-    customer_code: input.pickupLocationId,
+    customer_code: (input.registeredPickupCode || input.pickupLocationId),
     origin_pincode: input.originPincode,
     consignee: {
       name: input.recipient.name,
@@ -540,6 +543,9 @@ export function parseCancelResponse(body: unknown): ParsedSimpleAck {
 
 export interface PickupBodyInput {
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   /** ISO date. */
   pickupDate: string;
   packageCount: number;
@@ -552,7 +558,7 @@ export function buildPickupBody(input: PickupBodyInput): string {
   return JSON.stringify({
     pickup_date: input.pickupDate,
     pickup_time: '10:00:00', // TODO(sandbox-verify): required window field
-    customer_code: input.pickupLocationId,
+    customer_code: (input.registeredPickupCode || input.pickupLocationId),
     expected_package_count: input.packageCount,
   });
 }

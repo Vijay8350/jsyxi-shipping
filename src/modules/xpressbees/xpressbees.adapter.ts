@@ -141,6 +141,8 @@ function defaultTokenCache(): TokenCache {
 
 export interface XpressbeesAdapterOptions {
   courierAccountId: string;
+  /** Merchant's courier-registered pickup/customer code (optional). */
+  pickupCode?: string;
   courierCode?: string;
   mode: CourierAccountMode;
   /** Plaintext login credentials, confined to this instance (§5.7 control 1,
@@ -175,6 +177,7 @@ export class XpressbeesAdapter implements CourierAdapter {
   readonly requestLog: XpressbeesCallRecord[] = [];
 
   private readonly courierAccountId: string;
+  private readonly pickupCode?: string;
   private readonly baseUrl: string;
   private readonly email: string;
   private readonly password: string;
@@ -192,6 +195,7 @@ export class XpressbeesAdapter implements CourierAdapter {
   constructor(options: XpressbeesAdapterOptions) {
     this.courierCode = options.courierCode ?? XPRESSBEES_COURIER_CODE;
     this.courierAccountId = options.courierAccountId;
+    this.pickupCode = options.pickupCode;
     this.baseUrl =
       options.baseUrlOverride ??
       XPRESSBEES_BASE_URLS[options.mode] ??
@@ -448,6 +452,7 @@ export class XpressbeesAdapter implements CourierAdapter {
         body: buildCreateShipmentBody({
           merchantReference: intent.merchantReference,
           pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
           recipient: request.recipient,
           paymentMode: request.paymentMode,
           collectible: request.collectible,
@@ -582,6 +587,7 @@ export class XpressbeesAdapter implements CourierAdapter {
       body: buildPickupBody({
         awbs: request.awbs,
         pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
         pickupDate: request.pickupDate,
       }),
     });
@@ -624,6 +630,10 @@ export const xpressbeesAdapterFactory: AdapterFactory = (ctx: AdapterBuildContex
   }
   return new XpressbeesAdapter({
     courierAccountId: ctx.courierAccountId,
+      pickupCode:
+        typeof ctx.credentials.pickup_code === 'string' && ctx.credentials.pickup_code
+          ? ctx.credentials.pickup_code
+          : undefined,
     courierCode: ctx.courierCode,
     mode: ctx.mode,
     email,

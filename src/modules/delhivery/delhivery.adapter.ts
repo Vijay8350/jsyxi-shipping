@@ -83,6 +83,8 @@ import {
 
 export interface DelhiveryAdapterOptions {
   courierAccountId: string;
+  /** Merchant's courier-registered pickup/customer code (optional). */
+  pickupCode?: string;
   courierCode?: string;
   mode: CourierAccountMode;
   /** Plaintext api_token, confined to this instance (§5.7 control 1,
@@ -115,6 +117,7 @@ export class DelhiveryAdapter implements CourierAdapter {
   private readonly baseUrl: string;
   private readonly apiToken: string;
   private readonly now: () => Date;
+  private readonly pickupCode?: string;
   private readonly fetchFn: typeof fetch;
   /** INV-5: intent → the outcome of the one create issued for it. */
   private readonly createsByIntent = new Map<string, CreateShipmentResult>();
@@ -125,6 +128,7 @@ export class DelhiveryAdapter implements CourierAdapter {
       options.baseUrlOverride ?? DELHIVERY_BASE_URLS[options.mode] ?? DELHIVERY_BASE_URLS.LIVE;
     this.apiToken = options.apiToken;
     this.now = options.now;
+    this.pickupCode = options.pickupCode;
     this.fetchFn = options.fetchFn ?? fetch;
   }
 
@@ -330,6 +334,7 @@ export class DelhiveryAdapter implements CourierAdapter {
           waybill,
           merchantReference: intent.merchantReference,
           pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
           recipient: request.recipient,
           paymentMode: request.paymentMode,
           collectible: request.collectible,
@@ -459,6 +464,7 @@ export class DelhiveryAdapter implements CourierAdapter {
     const body = await this.call('schedulePickup', DELHIVERY_ENDPOINTS.pickup, {
       body: buildPickupBody({
         pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
         pickupDate: request.pickupDate,
         packageCount: request.awbs.length,
       }),
@@ -498,6 +504,10 @@ export const delhiveryAdapterFactory: AdapterFactory = (ctx: AdapterBuildContext
   }
   return new DelhiveryAdapter({
     courierAccountId: ctx.courierAccountId,
+      pickupCode:
+        typeof ctx.credentials.pickup_code === 'string' && ctx.credentials.pickup_code
+          ? ctx.credentials.pickup_code
+          : undefined,
     courierCode: ctx.courierCode,
     mode: ctx.mode,
     apiToken,

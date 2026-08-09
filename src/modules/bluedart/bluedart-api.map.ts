@@ -368,6 +368,9 @@ export function parseQuoteChargesResponse(body: unknown): ParsedQuoteCharges {
 export interface CreatePayloadInput {
   merchantReference: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   recipient: {
     name: string;
     addressLines: string[];
@@ -413,8 +416,8 @@ export function buildCreateShipmentBody(input: CreatePayloadInput): string {
         ConsigneeEmailID: input.recipient.email ?? '',
       },
       Shipper: {
-        CustomerCode: input.pickupLocationId,
-        OriginArea: input.pickupLocationId,
+        CustomerCode: (input.registeredPickupCode || input.pickupLocationId),
+        OriginArea: (input.registeredPickupCode || input.pickupLocationId),
       },
       Services: {
         CreditReferenceNo: input.merchantReference, // §9.5.4 stable merchant reference
@@ -590,6 +593,9 @@ export function parseCancelResponse(body: unknown): ParsedSimpleAck {
 
 export interface PickupBodyInput {
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   awbs: string[];
   /** ISO date. */
   pickupDate: string;
@@ -601,8 +607,8 @@ export interface PickupBodyInput {
 export function buildPickupBody(input: PickupBodyInput): string {
   return JSON.stringify({
     Request: {
-      CustomerCode: input.pickupLocationId,
-      AreaCode: input.pickupLocationId,
+      CustomerCode: (input.registeredPickupCode || input.pickupLocationId),
+      AreaCode: (input.registeredPickupCode || input.pickupLocationId),
       PickupDate: input.pickupDate,
       PickupTime: '1000', // TODO(sandbox-verify): required window field (HHmm)
       AWBNo: input.awbs,

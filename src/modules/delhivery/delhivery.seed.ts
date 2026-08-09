@@ -56,6 +56,20 @@ export const DELHIVERY_SEED = {
       validationRegex: null as string | null,
       displayOrder: 1,
     },
+      {
+      // The merchant's courier-registered pickup identity. NOT a secret — it
+      // is an account reference, and masking it would only stop the merchant
+      // checking what they typed. Optional so an existing account keeps
+      // working; when unset the adapter falls back to the internal id, which
+      // is the pre-existing (wrong) behaviour rather than a new failure.
+      key: 'pickup_code',
+      label: 'Registered client / warehouse name',
+      type: 'text',
+      isSecret: false,
+      isRequired: false,
+      validationRegex: null as string | null,
+      displayOrder: 2,
+    },
   ],
   /**
    * §8.2 capabilities: Delhivery implements all 8 adapter methods, so every

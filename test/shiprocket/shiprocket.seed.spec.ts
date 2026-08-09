@@ -22,6 +22,7 @@ describe('Shiprocket seed data', () => {
       'email',
       'password',
       'shiprocket_courier_map',
+      'pickup_code',
     ]);
     const secrets = SHIPROCKET_SEED.credentialFields.filter((f) => f.isSecret);
     expect(secrets.map((f) => f.key)).toEqual(['email', 'password']);

@@ -214,6 +214,9 @@ export function parseRetryAfterMs(header: string | null): number | null {
 export interface CreatePayloadInput {
   merchantReference: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   recipient: {
     name: string;
     addressLines: string[];
@@ -249,7 +252,7 @@ export interface CreatePayloadInput {
 export function buildCreateShipmentBody(input: CreatePayloadInput): string {
   return JSON.stringify({
     client_order_id: input.merchantReference, // §9.5.4 stable merchant reference
-    pickup_location_code: input.pickupLocationId,
+    pickup_location_code: (input.registeredPickupCode || input.pickupLocationId),
     address_details: {
       name: input.recipient.name,
       address_line_1: input.recipient.addressLines[0] ?? '',
@@ -425,6 +428,9 @@ export function parseSimpleAckResponse(body: unknown, rejectedFallback: string):
 export interface PickupBodyInput {
   awbs: string[];
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   /** ISO date. */
   pickupDate: string;
 }
@@ -434,7 +440,7 @@ export interface PickupBodyInput {
 export function buildPickupBody(input: PickupBodyInput): string {
   return JSON.stringify({
     awbs: input.awbs,
-    pickup_location_code: input.pickupLocationId,
+    pickup_location_code: (input.registeredPickupCode || input.pickupLocationId),
     pickup_date: input.pickupDate,
   });
 }

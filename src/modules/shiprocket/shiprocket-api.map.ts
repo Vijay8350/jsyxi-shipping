@@ -409,6 +409,9 @@ export interface CreateOrderInput {
   /** 'YYYY-MM-DD HH:mm' (Shiprocket's required order_date format). */
   orderDate: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   recipient: {
     name: string;
     addressLines: string[];
@@ -447,7 +450,7 @@ export function buildCreateOrderBody(input: CreateOrderInput): string {
   return JSON.stringify({
     order_id: input.merchantReference, // §9.5.4 stable merchant reference
     order_date: input.orderDate,
-    pickup_location: input.pickupLocationId,
+    pickup_location: (input.registeredPickupCode || input.pickupLocationId),
     billing_customer_name: firstName || input.recipient.name,
     billing_last_name: rest.join(' '),
     billing_address: input.recipient.addressLines[0] ?? '',

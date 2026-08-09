@@ -354,6 +354,9 @@ export interface CreatePayloadInput {
   waybill: string;
   merchantReference: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   recipient: {
     name: string;
     addressLines: string[];
@@ -383,7 +386,7 @@ export interface CreatePayloadInput {
  */
 export function buildCreateShipmentBody(input: CreatePayloadInput): string {
   const data = {
-    pickup_location: { name: input.pickupLocationId },
+    pickup_location: { name: (input.registeredPickupCode || input.pickupLocationId) },
     shipments: [
       {
         waybill: input.waybill,
@@ -554,6 +557,9 @@ export function parseCancelResponse(body: unknown): ParsedSimpleAck {
 
 export interface PickupBodyInput {
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   /** ISO date. */
   pickupDate: string;
   packageCount: number;
@@ -566,7 +572,7 @@ export function buildPickupBody(input: PickupBodyInput): string {
   return JSON.stringify({
     pickup_date: input.pickupDate,
     pickup_time: '10:00:00', // TODO(sandbox-verify): required window field
-    pickup_location: input.pickupLocationId,
+    pickup_location: (input.registeredPickupCode || input.pickupLocationId),
     expected_package_count: input.packageCount,
   });
 }

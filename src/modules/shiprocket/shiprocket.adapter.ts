@@ -152,6 +152,8 @@ export const SHIPROCKET_NDR_FALLBACK_NOTE =
 
 export interface ShiprocketAdapterOptions {
   courierAccountId: string;
+  /** Merchant's courier-registered pickup/customer code (optional). */
+  pickupCode?: string;
   courierCode?: string;
   mode: CourierAccountMode;
   /** Plaintext login credentials, confined to this instance (§5.7 control 1,
@@ -197,6 +199,7 @@ export class ShiprocketAdapter implements CourierAdapter {
   readonly requestLog: ShiprocketCallRecord[] = [];
 
   private readonly courierAccountId: string;
+  private readonly pickupCode?: string;
   private readonly baseUrl: string;
   private readonly email: string;
   private readonly password: string;
@@ -217,6 +220,7 @@ export class ShiprocketAdapter implements CourierAdapter {
   constructor(options: ShiprocketAdapterOptions) {
     this.courierCode = options.courierCode ?? SHIPROCKET_COURIER_CODE;
     this.courierAccountId = options.courierAccountId;
+    this.pickupCode = options.pickupCode;
     this.baseUrl =
       options.baseUrlOverride ??
       SHIPROCKET_BASE_URLS[options.mode] ??
@@ -637,6 +641,7 @@ export class ShiprocketAdapter implements CourierAdapter {
           merchantReference: intent.merchantReference,
           orderDate: shiprocketOrderDate(this.now()),
           pickupLocationId: request.pickupLocationId,
+          registeredPickupCode: this.pickupCode,
           recipient: request.recipient,
           paymentMode: request.paymentMode,
           collectible: request.collectible,
@@ -930,6 +935,10 @@ export const createShiprocketAdapterFactory =
     }
     return new ShiprocketAdapter({
       courierAccountId: ctx.courierAccountId,
+      pickupCode:
+        typeof ctx.credentials.pickup_code === 'string' && ctx.credentials.pickup_code
+          ? ctx.credentials.pickup_code
+          : undefined,
       courierCode: ctx.courierCode,
       mode: ctx.mode,
       email,

@@ -65,6 +65,20 @@ export const BLUEDART_SEED = {
       validationRegex: null as string | null,
       displayOrder: 2,
     },
+      {
+      // The merchant's courier-registered pickup identity. NOT a secret — it
+      // is an account reference, and masking it would only stop the merchant
+      // checking what they typed. Optional so an existing account keeps
+      // working; when unset the adapter falls back to the internal id, which
+      // is the pre-existing (wrong) behaviour rather than a new failure.
+      key: 'pickup_code',
+      label: 'Customer code (registered pickup)',
+      type: 'text',
+      isSecret: false,
+      isRequired: false,
+      validationRegex: null as string | null,
+      displayOrder: 3,
+    },
   ],
   /**
    * §8.2 capabilities: Blue Dart implements 7 of 8 adapter methods.

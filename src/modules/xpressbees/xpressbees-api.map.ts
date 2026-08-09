@@ -251,6 +251,9 @@ export function parseLoginResponse(body: unknown): ParsedLogin {
 export interface CreatePayloadInput {
   merchantReference: string;
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   recipient: {
     name: string;
     addressLines: string[];
@@ -296,7 +299,7 @@ export function buildCreateShipmentBody(input: CreatePayloadInput): string {
     package_breadth: input.widthCm,
     package_height: input.heightCm,
     quantity: '1', // INV-4: fixed 1 at v1
-    pickup: { warehouse_name: input.pickupLocationId },
+    pickup: { warehouse_name: (input.registeredPickupCode || input.pickupLocationId) },
     consignee: {
       name: input.recipient.name,
       address: input.recipient.addressLines[0] ?? '',
@@ -475,6 +478,9 @@ export function parseCancelResponse(body: unknown): ParsedSimpleAck {
 export interface PickupBodyInput {
   awbs: string[];
   pickupLocationId: string;
+  /** The merchant's courier-registered pickup/customer code, from their
+   *  credentials. Falls back to pickupLocationId when unset. */
+  registeredPickupCode?: string;
   /** ISO date. */
   pickupDate: string;
 }
@@ -487,7 +493,7 @@ export function buildPickupBody(input: PickupBodyInput): string {
     pickup_date: input.pickupDate,
     pickup_time: '10:00:00', // TODO(sandbox-verify): required window field
     awb_numbers: input.awbs,
-    warehouse_name: input.pickupLocationId,
+    warehouse_name: (input.registeredPickupCode || input.pickupLocationId),
   });
 }
 

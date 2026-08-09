@@ -93,6 +93,20 @@ export const SHIPROCKET_SEED = {
       validationRegex: null as string | null,
       displayOrder: 3,
     },
+      {
+      // The merchant's courier-registered pickup identity. NOT a secret — it
+      // is an account reference, and masking it would only stop the merchant
+      // checking what they typed. Optional so an existing account keeps
+      // working; when unset the adapter falls back to the internal id, which
+      // is the pre-existing (wrong) behaviour rather than a new failure.
+      key: 'pickup_code',
+      label: 'Registered pickup location',
+      type: 'text',
+      isSecret: false,
+      isRequired: false,
+      validationRegex: null as string | null,
+      displayOrder: 4,
+    },
   ],
   /**
    * §8.2 capabilities: Shiprocket implements 7 of 8 adapter methods.

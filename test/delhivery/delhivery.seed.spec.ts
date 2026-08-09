@@ -18,7 +18,10 @@ describe('Delhivery seed data', () => {
       kind: 'DIRECT',
       authPattern: 'KEY_PASTE',
     });
-    expect(DELHIVERY_SEED.credentialFields).toHaveLength(1);
+        // pickup_code (the merchant's courier-registered pickup identity) is
+    // appended by the shared credential schema and asserted in
+    // test/courier-framework/registered-pickup-code.spec.ts.
+    expect(DELHIVERY_SEED.credentialFields.filter((f) => f.isSecret)).toHaveLength(1);
     expect(DELHIVERY_SEED.credentialFields[0]).toMatchObject({
       key: 'api_token',
       isSecret: true,
