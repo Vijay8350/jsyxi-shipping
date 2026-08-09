@@ -76,6 +76,11 @@
   --border:      var(--ink-200);
   --text:        var(--ink-900);
   --text-muted:  var(--ink-500);
+  /* The sidebar carries the brand, so it gets its own token: against a light
+     page petrol-900 reads as deep teal, but on a dark page it collapses into
+     the background and the product loses its only large area of colour. */
+  --sidebar:     var(--petrol-900);
+  --sidebar-edge: transparent;
 
   /* Elevation — §9.22 "elevated cards". Layered, not a single blur. */
   --e1: 0 1px 2px rgba(13, 20, 26, .06), 0 1px 3px rgba(13, 20, 26, .04);
@@ -112,6 +117,8 @@
     --e1: 0 1px 2px rgba(0,0,0,.4);
     --e2: 0 2px 6px rgba(0,0,0,.45);
     --e3: 0 10px 30px rgba(0,0,0,.55);
+    --sidebar: #072f36;
+    --sidebar-edge: #0c3f48;
   }
 }
 :root[data-theme="dark"] {
@@ -122,6 +129,8 @@
   --e1: 0 1px 2px rgba(0,0,0,.4);
   --e2: 0 2px 6px rgba(0,0,0,.45);
   --e3: 0 10px 30px rgba(0,0,0,.55);
+    --sidebar: #072f36;
+    --sidebar-edge: #0c3f48;
 }
 
 /* ─── Base ───────────────────────────────────────────────────────────── */
@@ -146,7 +155,8 @@ a:hover { text-decoration: underline; }
 .shell { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
 
 .sidebar {
-  background: var(--petrol-900);
+  background: var(--sidebar);
+  border-right: 1px solid var(--sidebar-edge);
   color: var(--petrol-100);
   padding: 16px 12px;
   display: flex; flex-direction: column; gap: 4px;
@@ -224,6 +234,10 @@ a.tile:hover { text-decoration: none; box-shadow: var(--e2); transform: translat
   letter-spacing: -.02em;
 }
 .tile-value.attn { color: var(--petrol-600); }
+/* A zero needs no attention, so it recedes. The dashboard is scanned for what
+   requires action; nine equally-loud zeros hide the one number that matters. */
+.tile-value.zero { color: var(--text-muted); font-weight: 500; }
+.tile.quiet { background: transparent; box-shadow: none; }
 .tile-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
 /* ─── Table — §9.22 "instant-feeling tables" ─────────────────────────── */

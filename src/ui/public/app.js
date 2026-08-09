@@ -27,6 +27,23 @@
   var root = document.getElementById('root');
   var toastHost = document.getElementById('toasts');
 
+  /* Theme. Follows the OS until the operator picks a side, then that sticks —
+     a warehouse screen and a finance laptop rarely want the same one, and the
+     OS setting is not always theirs to change. */
+  var THEME_KEY = 'jsyxi.theme';
+  function applyTheme() {
+    var t = localStorage.getItem(THEME_KEY);
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    else document.documentElement.removeAttribute('data-theme');
+  }
+  function currentTheme() {
+    var stored = localStorage.getItem(THEME_KEY);
+    if (stored) return stored;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark' : 'light';
+  }
+  applyTheme();
+
   // ─── Utilities ────────────────────────────────────────────────────────
   function h(html) {
     // Single escape helper; every interpolation of server data goes through it.
@@ -66,9 +83,21 @@
     return Math.round(hrs / 24) + ' d ago';
   }
 
+  /* Domain acronyms must survive title-casing. Naive title case renders COD as
+     "Cod" and NDR as "Ndr", which reads as a typo to anyone who works in
+     logistics and quietly undermines trust in every other number on screen. */
+  var ACRONYMS = {
+    COD: 1, NDR: 1, RTO: 1, GST: 1, GSTIN: 1, AWB: 1, SLA: 1, TAT: 1, EDD: 1,
+    SKU: 1, HSN: 1, PIN: 1, OTP: 1, API: 1, CSV: 1, PDF: 1, ID: 1, DTDC: 1,
+    KYC: 1, QC: 1, ETA: 1,
+  };
+
   function titleCase(s) {
-    return String(s || '').replace(/_/g, ' ').toLowerCase()
-      .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    return String(s || '').split(/[_\s]+/).filter(Boolean).map(function (w) {
+      var up = w.toUpperCase();
+      if (ACRONYMS[up]) return up;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    }).join(' ');
   }
 
   function toast(msg, bad) {
@@ -154,6 +183,8 @@
             '<div class="spacer"></div>' +
             (shop ? '<span class="muted" style="font-size:13px">' + h(shop) + '</span>' : '') +
             (role ? '<span class="badge">' + h(titleCase(role)) + '</span>' : '') +
+            '<button class="btn sm" id="theme" title="Switch theme" aria-label="Switch theme">' +
+              (currentTheme() === 'dark' ? '☀' : '☾') + '</button>' +
             '<button class="btn sm" id="logout">Sign out</button>' +
           '</header>' +
           '<main class="content" id="view"></main>' +
@@ -197,13 +228,30 @@
   }
 
   // ─── Badges ───────────────────────────────────────────────────────────
+  /* Tone by real enum label (order_state, booking_state, custody_state,
+     movement_state, plus account/health states). Anything unmapped renders
+     neutral rather than guessing — a wrong colour on a state is worse than
+     no colour, because operators learn the colour before the word. */
   var TONE = {
-    DELIVERED: 'ok', CONFIRMED: 'ok', ACTIVE: 'ok', CONNECTED: 'ok', READY: 'ok',
-    IN_TRANSIT: 'info', OUT_FOR_DELIVERY: 'info', QUEUED: 'info', IMPORTED: 'info',
+    // Good / terminal-successful
+    DELIVERED: 'ok', CONFIRMED: 'ok', FULLY_BOOKED: 'ok', CLOSED: 'ok',
+    ACTIVE: 'ok', CONNECTED: 'ok', READY: 'ok', ISSUED: 'ok', HEALTHY: 'ok',
+    IN_CUSTODY: 'ok', ASSIGNED: 'ok', PREPAID: 'ok', MATCHED: 'ok',
+    // In flight
+    IN_TRANSIT: 'info', OUT_FOR_DELIVERY: 'info', QUEUED: 'info',
+    SUBMITTED: 'info', IMPORTED: 'info', PARTIALLY_BOOKED: 'info',
+    PICKUP_SCHEDULED: 'info', TRIALING: 'info', PROCESSING: 'info',
+    // Needs a human
     PICKUP_PENDING: 'warn', NEEDS_MANUAL_ASSIGNMENT: 'warn', NDR: 'warn',
     UNASSIGNED: 'warn', ISSUE_PENDING: 'warn', DEGRADED: 'warn',
-    FAILED: 'bad', CANCELLED: 'bad', RTO: 'bad', RTO_DELIVERED: 'bad',
-    DISCONNECTED: 'bad', LOST: 'bad',
+    INCOMPLETE: 'warn', OUTCOME_UNKNOWN: 'warn', CANCEL_REQUESTED: 'warn',
+    COD: 'warn', DISPUTED: 'warn', MISMATCH: 'warn', PENDING: 'warn',
+    // Bad / terminal-unsuccessful
+    FAILED: 'bad', VOID: 'bad', CANCELLED: 'bad', CANCELLED_IN_SHOPIFY: 'bad',
+    CANCELLED_BY_COURIER: 'bad', CANCEL_REJECTED: 'bad',
+    RTO_INITIATED: 'bad', RTO_IN_TRANSIT: 'bad', RTO_OUT_FOR_DELIVERY: 'bad',
+    RTO_DELIVERED: 'bad', LOST_OR_DAMAGED: 'bad', DISCONNECTED: 'bad',
+    SUSPENDED: 'bad', UNRESOLVED: 'bad',
   };
 
   function stateBadge(value) {
@@ -612,10 +660,11 @@
         var v = (d.cards && d.cards[key]) || 0;
         var inner =
           '<div class="tile-label">' + h(meta.label) + '</div>' +
-          '<div class="tile-value' + (v > 0 ? ' attn' : '') + '">' + num(v) + '</div>';
-        return meta.to
-          ? '<a class="tile" href="' + meta.to + '">' + inner + '</a>'
-          : '<div class="tile">' + inner + '</div>';
+          '<div class="tile-value' + (v > 0 ? ' attn' : ' zero') + '">' + num(v) + '</div>';
+        var cls = 'tile' + (v > 0 ? '' : ' quiet');
+        return meta.to && v > 0
+          ? '<a class="' + cls + '" href="' + meta.to + '">' + inner + '</a>'
+          : '<div class="' + cls + '">' + inner + '</div>';
       }).join('');
 
       var t = (d.todayVsYesterday && d.todayVsYesterday.today) || { booked: 0, delivered: 0 };
@@ -691,7 +740,11 @@
     noun: 'order', nounPlural: 'orders',
     endpoint: '/orders',
     searchHint: 'Search order number…',
-    states: ['IMPORTED', 'READY', 'PARTIALLY_SHIPPED', 'SHIPPED', 'CANCELLED', 'EXCLUDED'],
+    // The real order_state enum. Offering a label the enum does not have
+    // silently returns nothing, which reads as "no orders" rather than
+    // "that state does not exist".
+    states: ['IMPORTED', 'INCOMPLETE', 'READY', 'PARTIALLY_BOOKED', 'FULLY_BOOKED',
+             'CLOSED', 'CANCELLED_IN_SHOPIFY'],
     emptyTitle: 'No orders here',
     emptySub: 'Orders sync from Shopify automatically once webhooks are delivering.',
     columns: [
@@ -721,7 +774,9 @@
     noun: 'shipment', nounPlural: 'shipments',
     endpoint: '/shipments',
     searchHint: 'Search AWB or order number…',
-    states: ['DRAFT', 'QUEUED', 'CONFIRMED', 'FAILED', 'CANCELLED', 'NEEDS_MANUAL_ASSIGNMENT'],
+    // The real booking_state enum (§3.2).
+    states: ['DRAFT', 'NEEDS_MANUAL_ASSIGNMENT', 'QUEUED', 'SUBMITTED', 'CONFIRMED',
+             'FAILED', 'OUTCOME_UNKNOWN', 'VOID'],
     emptyTitle: 'No shipments here',
     emptySub: 'A shipment appears once an order is ready to book.',
     columns: [
@@ -1182,6 +1237,12 @@
   function paint() {
     var route = currentRoute();
     root.innerHTML = shell(route);
+
+    document.getElementById('theme').addEventListener('click', function () {
+      localStorage.setItem(THEME_KEY, currentTheme() === 'dark' ? 'light' : 'dark');
+      applyTheme();
+      paint();
+    });
 
     document.getElementById('logout').addEventListener('click', function () {
       api('/auth/logout', { method: 'POST' })
