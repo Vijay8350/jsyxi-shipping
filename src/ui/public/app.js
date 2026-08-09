@@ -678,17 +678,28 @@
         return '<span class="badge ' + tone + '">' + sign + ' ' + Math.abs(diff) + ' vs yesterday</span>';
       }
 
+      /* §4.10 / F-16: none of these three rates is "over booked", and showing
+         them beside a Booked column invites exactly that misreading — a
+         delivery rate of 100% next to "12 booked, 2 delivered" looks broken
+         when it is correct. So the denominator is named in the header and the
+         exact formula is in the tooltip, and Resolved is shown so the
+         arithmetic is checkable on screen. */
+      function pct(v) {
+        return v === null || v === undefined ? '<span class="muted">—</span>'
+                                            : (v * 100).toFixed(1) + '%';
+      }
       var perf = (d.servicePerformance || []).slice(0, 8).map(function (r) {
+        var resolved = (r.delivered || 0) + (r.rtoDelivered || 0);
         return '<tr>' +
           '<td>' + h(r.serviceName || r.courierCode || 'Unassigned') + '</td>' +
           '<td class="num">' + num(r.booked) + '</td>' +
           '<td class="num">' + num(r.delivered) + '</td>' +
-          '<td class="num">' + (r.deliveryRate === null || r.deliveryRate === undefined
-            ? '—' : (r.deliveryRate * 100).toFixed(1) + '%') + '</td>' +
-          '<td class="num">' + (r.rtoRate === null || r.rtoRate === undefined
-            ? '—' : (r.rtoRate * 100).toFixed(1) + '%') + '</td>' +
+          '<td class="num">' + (resolved ? num(resolved) : '<span class="muted">—</span>') + '</td>' +
+          '<td class="num">' + pct(r.deliveryRate) + '</td>' +
+          '<td class="num">' + pct(r.rtoRate) + '</td>' +
+          '<td class="num">' + pct(r.ndrRate) + '</td>' +
           '<td class="num">' + (r.avgTatHours === null || r.avgTatHours === undefined
-            ? '—' : r.avgTatHours.toFixed(1) + ' h') + '</td>' +
+            ? '<span class="muted">—</span>' : r.avgTatHours.toFixed(1) + ' h') + '</td>' +
           '</tr>';
       }).join('');
 
@@ -723,8 +734,14 @@
             '<div class="card-body flush">' +
             (perf
               ? '<div class="table-wrap"><table class="data"><thead><tr>' +
-                '<th>Service</th><th class="num">Booked</th><th class="num">Delivered</th>' +
-                '<th class="num">Delivery rate</th><th class="num">RTO rate</th><th class="num">Avg TAT</th>' +
+                '<th>Service</th>' +
+                '<th class="num">Booked</th>' +
+                '<th class="num">Delivered</th>' +
+                '<th class="num" title="Delivered + RTO delivered — shipments that reached a terminal outcome">Resolved</th>' +
+                '<th class="num" title="F-16.a — Delivered ÷ (Delivered + RTO delivered). Of resolved shipments, the share that reached the customer. Not a share of booked.">Delivered ÷ resolved</th>' +
+                '<th class="num" title="F-16.c — RTO delivered ÷ all terminal shipments">RTO ÷ terminal</th>' +
+                '<th class="num" title="F-16.b — Shipments with at least one NDR ÷ picked-up shipments">NDR ÷ picked up</th>' +
+                '<th class="num" title="F-16.d — mean hours from picked up to delivered">Avg TAT</th>' +
                 '</tr></thead><tbody>' + perf + '</tbody></table></div>'
               : empty('No performance data yet', 'Figures appear once shipments have been booked and rolled up.')) +
             '</div></div>' +
@@ -948,11 +965,19 @@
       var members = team ? (Array.isArray(team) ? team : team.members || team.items || []) : [];
 
       var memberRows = members.map(function (m) {
-        return '<tr><td class="mono">' + h(m.memberId || m.member_id || '—') + '</td>' +
+        /* Identify a person by something a human recognises. The member_id is
+           an internal UUID — for a Shopify staff member the staff user id is
+           what appears in Shopify's own admin, and email when we have it. */
+        var who = m.email || m.shopify_staff_user_id || m.shopifyStaffUserId;
+        var id = m.memberId || m.member_id || '';
+        return '<tr><td>' + (who
+            ? '<strong>' + h(who) + '</strong>'
+            : '<span class="mono muted">' + h(id.slice(0, 8)) + '</span>') +
+          (m.revoked_at || m.revokedAt ? ' <span class="badge bad">Revoked</span>' : '') + '</td>' +
           '<td>' + stateBadge(m.role) + '</td>' +
           '<td>' + h(titleCase(m.authSource || m.auth_source || '')) + '</td>' +
           '<td class="muted">' + h(m.lastActiveAt || m.last_active_at
-            ? dateTime(m.lastActiveAt || m.last_active_at) : '—') + '</td></tr>';
+            ? dateTime(m.lastActiveAt || m.last_active_at) : 'never') + '</td></tr>';
       }).join('');
 
       view.innerHTML =
@@ -1151,6 +1176,10 @@
       var sub = res[0] || {};
       var history = unwrap(res[1]);
 
+      // The endpoint returns { subscription, plan } — not a flat object.
+      var s = sub.subscription || sub;
+      var plan = sub.plan || {};
+
       var subCard = sub.__err
         ? '<div class="card"><div class="card-body">' +
           (sub.__err.status === 403
@@ -1159,13 +1188,17 @@
           '</div></div>'
         : '<div class="card"><div class="card-head"><h2>Subscription</h2></div>' +
           '<div class="card-body"><dl class="kv">' +
-            '<dt>State</dt><dd>' + stateBadge(sub.state || (sub.subscription && sub.subscription.state)) + '</dd>' +
-            '<dt>Plan</dt><dd>' + h(sub.planCode || sub.plan_code ||
-              (sub.plan && (sub.plan.code || sub.plan.name)) || '—') + '</dd>' +
-            '<dt>Cycle ends</dt><dd>' + h(dateTime(sub.cycleEndAt || sub.cycle_end_at)) + '</dd>' +
-            (sub.cappedAmount || sub.capped_amount
+            '<dt>State</dt><dd>' + stateBadge(s.state) + '</dd>' +
+            '<dt>Plan</dt><dd>' + h(plan.name || plan.code || '—') + '</dd>' +
+            '<dt>Cycle</dt><dd>' +
+              (s.cycle_start_at || s.cycleStartAt
+                ? h(dateTime(s.cycle_start_at || s.cycleStartAt)) + ' → ' +
+                  h(dateTime(s.cycle_end_at || s.cycleEndAt))
+                : '<span class="muted">—</span>') + '</dd>' +
+            '<dt>Currency</dt><dd>' + h(s.currency || 'INR') + '</dd>' +
+            (s.capped_amount || s.cappedAmount
               ? '<dt>Capped amount</dt><dd class="money">' +
-                money(sub.cappedAmount || sub.capped_amount) + '</dd>' : '') +
+                money(s.capped_amount || s.cappedAmount) + '</dd>' : '') +
           '</dl></div></div>';
 
       var rows = history.map(function (r) {
@@ -1193,21 +1226,44 @@
     view.innerHTML = '<div class="page-head"><h1>Setup</h1></div>' + loading();
 
     api('/setup/health').then(function (d) {
-      var checks = unwrap(d) .length ? unwrap(d) : (d.checks || []);
-      var rows = checks.map(function (c) {
-        var ok = c.ok !== undefined ? c.ok
-               : String(c.state || '').toUpperCase() === 'OK';
-        return '<tr><td><strong>' + h(c.title || titleCase(c.key || c.code || '—')) + '</strong>' +
-          (c.detail ? '<div class="muted" style="font-size:12.5px">' + h(c.detail) + '</div>' : '') +
-          '</td><td>' + (ok ? '<span class="badge ok">Ready</span>'
-                            : '<span class="badge warn">Needs attention</span>') + '</td></tr>';
+      // ADD-29/30 shape: { completed, items: [{ itemKey, label, fixPath,
+      // state: OK|MISSING|BROKEN, detail }] }.
+      var items = unwrap(d);
+      var outstanding = items.filter(function (c) { return c.state !== 'OK'; });
+
+      var rows = items.map(function (c) {
+        /* MISSING and BROKEN are different problems — one was never
+           configured, the other is configured and failing — so they do not
+           share a badge. Collapsing them would hide the more urgent one. */
+        var badge = c.state === 'OK' ? '<span class="badge ok">Ready</span>'
+                  : c.state === 'BROKEN' ? '<span class="badge bad">Broken</span>'
+                  : '<span class="badge warn">Not set up</span>';
+        // The service defaults detail to "Not yet evaluated." even for OK
+        // items; showing that under a green badge reads as a contradiction.
+        var detail = c.state !== 'OK' && c.detail && c.detail !== 'Not yet evaluated.'
+          ? '<div class="muted" style="font-size:12.5px;margin-top:2px">' + h(c.detail) + '</div>'
+          : '';
+        var fix = c.state !== 'OK' && c.fixPath
+          ? '<a class="btn sm" href="#' + h(c.fixPath) + '">Fix</a>'
+          : '';
+        return '<tr><td><strong>' + h(c.label || c.itemKey || '—') + '</strong>' + detail +
+          '</td><td>' + badge + '</td><td style="text-align:right">' + fix + '</td></tr>';
       }).join('');
+
+      var banner = items.length === 0 ? ''
+        : outstanding.length === 0
+          ? '<div class="banner" style="background:var(--ok-bg);color:var(--ok-fg);border-color:currentColor;margin-bottom:16px">' +
+            '<div><strong>Setup complete.</strong> Every check is ready.</div></div>'
+          : '<div class="banner warn" style="margin-bottom:16px"><div><strong>' +
+            outstanding.length + ' of ' + items.length + ' checks need attention.</strong><br>' +
+            'Shipments can still be booked, but these gaps cause failures later.</div></div>';
 
       view.innerHTML = '<div class="page-head"><h1>Setup</h1>' +
         '<span class="muted">What is still needed before you can ship</span></div>' +
+        banner +
         '<div class="card"><div class="card-body flush">' +
         (rows ? '<div class="table-wrap"><table class="data"><thead><tr>' +
-          '<th>Check</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+          '<th>Check</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
               : empty('Nothing to configure', 'Setup health reports no outstanding items.')) +
         '</div></div>';
     }).catch(function (err) {
