@@ -111,8 +111,18 @@
     { id: '', icon: '◧', label: 'Dashboard' },
     { id: 'orders', icon: '▤', label: 'Orders' },
     { id: 'shipments', icon: '▦', label: 'Shipments' },
+    { id: 'ndr', icon: '⚠', label: 'NDR' },
+    { section: 'Money' },
+    { id: 'invoices', icon: '₹', label: 'GST invoices' },
+    { id: 'recon-freight', icon: '⇄', label: 'Freight recon' },
+    { id: 'recon-cod', icon: '⊟', label: 'COD recon' },
+    { id: 'billing', icon: '◉', label: 'Plan & billing' },
     { section: 'Configure' },
+    { id: 'rules', icon: '⑂', label: 'Rules' },
+    { id: 'rate-cards', icon: '▥', label: 'Rate cards' },
     { id: 'couriers', icon: '◈', label: 'Couriers' },
+    { id: 'reports', icon: '↧', label: 'Reports' },
+    { id: 'setup', icon: '✓', label: 'Setup' },
     { id: 'settings', icon: '⚙', label: 'Settings' },
   ];
 
@@ -499,6 +509,86 @@
     return render;
   }
 
+  /**
+   * The modules were built at different times and envelope their rows
+   * differently — a bare array here, {items} there, {rows,total} elsewhere.
+   * Normalising once beats teaching every screen all the shapes.
+   */
+  function unwrap(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    var keys = ['items', 'rows', 'jobs', 'batches', 'cases', 'invoices',
+                'plans', 'schedules', 'members', 'data', 'results'];
+    for (var i = 0; i < keys.length; i++) {
+      if (Array.isArray(payload[keys[i]])) return payload[keys[i]];
+    }
+    return [];
+  }
+
+  function totalOf(payload, rows) {
+    if (payload && typeof payload.total === 'number') return payload.total;
+    if (payload && typeof payload.count === 'number') return payload.count;
+    return rows.length;
+  }
+
+  /**
+   * A read-only table screen. Most remaining modules are exactly this: fetch a
+   * collection, render columns, say something useful when it is empty.
+   *
+   * `opts.viewAware` sends the §9.23 view param; only pass it for endpoints
+   * that actually accept one, so we never send a filter that is silently
+   * ignored and leaves the operator thinking test data is filtered when it is
+   * not.
+   */
+  function simpleScreen(opts) {
+    return function () {
+      var view = document.getElementById('view');
+      var head = '<div class="page-head"><h1>' + h(opts.title) + '</h1>' +
+        (opts.subtitle ? '<span class="muted">' + h(opts.subtitle) + '</span>' : '') +
+        '</div>';
+      view.innerHTML = (opts.viewAware ? testBanner() : '') + head + loading();
+
+      var url = opts.endpoint + (opts.viewAware
+        ? (opts.endpoint.indexOf('?') === -1 ? '?' : '&') + 'view=' + state.view
+        : '');
+
+      Promise.resolve(opts.fetch ? opts.fetch() : api(url)).then(function (payload) {
+        var rows = unwrap(payload);
+        var table = rows.length
+          ? '<div class="table-wrap"><table class="data"><thead><tr>' +
+            opts.columns.map(function (c) {
+              return '<th' + (c.num ? ' class="num"' : '') + '>' + h(c.label) + '</th>';
+            }).join('') + '</tr></thead><tbody>' +
+            rows.map(function (r) {
+              return '<tr>' + opts.columns.map(function (c) {
+                return '<td' + (c.num ? ' class="num"' : '') +
+                  (c.mono ? ' class="mono"' : '') + '>' + c.cell(r) + '</td>';
+              }).join('') + '</tr>';
+            }).join('') + '</tbody></table></div>'
+          : empty(opts.emptyTitle, opts.emptySub);
+
+        view.innerHTML = (opts.viewAware ? testBanner() : '') + head +
+          (opts.above ? opts.above(payload) : '') +
+          '<div class="card"><div class="card-head"><h2>' + h(opts.tableTitle || opts.title) + '</h2>' +
+            '<div class="spacer"></div><span class="muted" style="font-size:12.5px">' +
+            num(totalOf(payload, rows)) + '</span></div>' +
+          '<div class="card-body flush">' + table + '</div></div>';
+      }).catch(function (err) {
+        if (err.message === 'unauthenticated') return;
+        /* A 403 here is a role boundary, not a fault — §10.2 grants these
+           screens to different roles, so say which permission is missing
+           rather than showing a red error. */
+        view.innerHTML = (opts.viewAware ? testBanner() : '') + head +
+          (err.status === 403
+            ? '<div class="card"><div class="card-body">' +
+              empty('Not available for your role',
+                'This screen needs a permission your role does not hold (§10.2).') +
+              '</div></div>'
+            : errorCard(err));
+      });
+    };
+  }
+
   // ─── Screens ──────────────────────────────────────────────────────────
   var CARD_META = {
     new_to_book: { label: 'Ready to book', to: '#/shipments' },
@@ -835,12 +925,257 @@
     });
   }
 
+  // §9.8 NDR inbox. Aging matters operationally, so it is computed and shown.
+  var screenNdr = simpleScreen({
+    title: 'NDR',
+    subtitle: 'Non-delivery cases',
+    tableTitle: 'Open cases',
+    endpoint: '/ndr/inbox',
+    viewAware: true,
+    emptyTitle: 'No NDR cases',
+    emptySub: 'Cases appear when a courier reports a failed delivery attempt.',
+    columns: [
+      { label: 'AWB', cell: function (r) {
+        return '<span class="mono">' + h(r.awb_normalized || r.awb || '—') + '</span>' +
+          testMarker(r.is_test); } },
+      { label: 'Reason', cell: function (r) { return stateBadge(r.reason_code || r.reason); } },
+      { label: 'State', cell: function (r) { return stateBadge(r.state); } },
+      { label: 'Attempts', num: true, cell: function (r) { return num(r.attempt_count); } },
+      { label: 'Aging', num: true, cell: function (r) {
+        var first = r.first_ndr_at || r.firstNdrAt;
+        if (!first) return '—';
+        var days = Math.floor((Date.now() - new Date(first).getTime()) / 86400000);
+        // Aging drives the §9.8 follow-up ladder, so old cases are marked.
+        var tone = days >= 3 ? 'bad' : days >= 1 ? 'warn' : '';
+        return '<span class="badge ' + tone + '">' + days + 'd</span>'; } },
+      { label: 'First reported', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.first_ndr_at)) + '</span>'; } },
+    ],
+  });
+
+  // §9.4 rules. Order is the whole semantics — first match wins — so priority
+  // leads the table and the natural sort is preserved.
+  var screenRules = simpleScreen({
+    title: 'Shipping rules',
+    subtitle: 'Evaluated in order; the first match wins',
+    tableTitle: 'Rules',
+    endpoint: '/rules',
+    emptyTitle: 'No rules yet',
+    emptySub: 'Without a rule, allocation falls back to the stored selection.',
+    columns: [
+      { label: '#', num: true, cell: function (r) {
+        return num(r.priority !== undefined ? r.priority : r.position); } },
+      { label: 'Name', cell: function (r) {
+        return '<strong>' + h(r.name || '—') + '</strong>'; } },
+      { label: 'Status', cell: function (r) {
+        var on = r.isActive !== undefined ? r.isActive : r.is_active;
+        return on ? '<span class="badge ok">Active</span>'
+                  : '<span class="badge">Paused</span>'; } },
+      { label: 'Updated', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.updatedAt || r.updated_at)) + '</span>'; } },
+    ],
+  });
+
+  var screenRateCards = simpleScreen({
+    title: 'Rate cards',
+    subtitle: 'Your negotiated courier pricing',
+    tableTitle: 'Cards',
+    endpoint: '/rate-cards',
+    emptyTitle: 'No rate cards',
+    emptySub: 'Without a rate card the engine falls back to live courier quotes.',
+    columns: [
+      { label: 'Name', cell: function (r) {
+        return '<strong>' + h(r.name || r.code || '—') + '</strong>'; } },
+      { label: 'Courier', cell: function (r) {
+        return h(titleCase(r.courierCode || r.courier_code || '—')); } },
+      { label: 'Status', cell: function (r) {
+        return stateBadge(r.state || (r.isSealed || r.is_sealed ? 'SEALED' : 'DRAFT')); } },
+      { label: 'Updated', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.updatedAt || r.updated_at)) + '</span>'; } },
+    ],
+  });
+
+  var screenInvoices = simpleScreen({
+    title: 'GST invoices',
+    tableTitle: 'Invoices',
+    endpoint: '/gst/invoices',
+    emptyTitle: 'No invoices',
+    emptySub: 'Invoices are issued against booked shipments.',
+    columns: [
+      { label: 'Number', mono: true, cell: function (r) {
+        return h(r.invoiceNumber || r.invoice_number || '—'); } },
+      { label: 'State', cell: function (r) { return stateBadge(r.state); } },
+      { label: 'Taxable', num: true, cell: function (r) {
+        return money(r.taxableValue || r.taxable_value); } },
+      { label: 'Total', num: true, cell: function (r) {
+        return money(r.totalValue || r.total_value || r.total); } },
+      { label: 'Issued', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.issuedAt || r.issued_at)) + '</span>'; } },
+    ],
+  });
+
+  var screenReports = simpleScreen({
+    title: 'Reports',
+    subtitle: 'Exports you have requested',
+    tableTitle: 'Recent jobs',
+    endpoint: '/reports/jobs',
+    emptyTitle: 'No reports run yet',
+    emptySub: 'Run a report to export orders, shipments or reconciliation data.',
+    columns: [
+      { label: 'Report', cell: function (r) {
+        return '<strong>' + h(titleCase(r.report_code || r.reportCode || '—')) + '</strong>'; } },
+      { label: 'State', cell: function (r) { return stateBadge(r.state); } },
+      { label: 'Rows', num: true, cell: function (r) {
+        var n = r.row_count !== undefined ? r.row_count : r.rowCount;
+        return n === null || n === undefined ? '—' : num(n); } },
+      { label: 'As of', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.as_of_at || r.asOfAt)) + '</span>'; } },
+      { label: '', cell: function (r) {
+        var id = r.report_job_id || r.reportJobId;
+        var done = String(r.state || '').toUpperCase() === 'READY' ||
+                   String(r.state || '').toUpperCase() === 'COMPLETED';
+        // The download URL is signed and expiring (S-26); let the browser
+        // follow it rather than fetching it through the API layer.
+        return done && id
+          ? '<a class="btn sm" href="/reports/jobs/' + h(id) + '/download">Download</a>'
+          : ''; } },
+    ],
+  });
+
+  var screenReconFreight = simpleScreen({
+    title: 'Freight reconciliation',
+    subtitle: 'Courier invoices matched against booked shipments',
+    tableTitle: 'Batches',
+    endpoint: '/recon/freight/batches',
+    emptyTitle: 'No freight batches',
+    emptySub: 'Upload a courier invoice to reconcile it against your shipments.',
+    columns: [
+      { label: 'Batch', mono: true, cell: function (r) {
+        return h((r.reconBatchId || r.recon_batch_id || '').slice(0, 8) || '—'); } },
+      { label: 'Courier', cell: function (r) {
+        return h(titleCase(r.courierCode || r.courier_code || '—')); } },
+      { label: 'State', cell: function (r) { return stateBadge(r.state); } },
+      { label: 'Control total', cell: function (r) {
+        // §3.28 MISMATCH is the headline: the batch cannot be trusted.
+        return stateBadge(r.controlTotalState || r.control_total_state); } },
+      { label: 'Rows', num: true, cell: function (r) {
+        return num(r.rowCount !== undefined ? r.rowCount : r.row_count); } },
+      { label: 'Uploaded', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.createdAt || r.created_at)) + '</span>'; } },
+    ],
+  });
+
+  var screenReconCod = simpleScreen({
+    title: 'COD reconciliation',
+    subtitle: 'Remittances matched against collectible amounts',
+    tableTitle: 'Batches',
+    endpoint: '/recon/cod/batches',
+    emptyTitle: 'No COD batches',
+    emptySub: 'Upload a courier remittance statement to reconcile it.',
+    columns: [
+      { label: 'Batch', mono: true, cell: function (r) {
+        return h((r.reconBatchId || r.recon_batch_id || '').slice(0, 8) || '—'); } },
+      { label: 'Courier', cell: function (r) {
+        return h(titleCase(r.courierCode || r.courier_code || '—')); } },
+      { label: 'State', cell: function (r) { return stateBadge(r.state); } },
+      { label: 'Remitted', num: true, cell: function (r) {
+        return money(r.remittedAmount || r.remitted_amount); } },
+      { label: 'Uploaded', cell: function (r) {
+        return '<span class="muted">' + h(dateTime(r.createdAt || r.created_at)) + '</span>'; } },
+    ],
+  });
+
+  function screenBilling() {
+    var view = document.getElementById('view');
+    view.innerHTML = '<div class="page-head"><h1>Plan &amp; billing</h1></div>' + loading();
+
+    Promise.all([
+      api('/billing/subscription').catch(function (e) { return { __err: e }; }),
+      api('/billing/history').catch(function () { return null; }),
+    ]).then(function (res) {
+      var sub = res[0] || {};
+      var history = unwrap(res[1]);
+
+      var subCard = sub.__err
+        ? '<div class="card"><div class="card-body">' +
+          (sub.__err.status === 403
+            ? empty('Not available for your role', 'Billing needs the billing.manage permission (§10.2).')
+            : '<div class="banner warn"><div>' + h(sub.__err.message) + '</div></div>') +
+          '</div></div>'
+        : '<div class="card"><div class="card-head"><h2>Subscription</h2></div>' +
+          '<div class="card-body"><dl class="kv">' +
+            '<dt>State</dt><dd>' + stateBadge(sub.state || (sub.subscription && sub.subscription.state)) + '</dd>' +
+            '<dt>Plan</dt><dd>' + h(sub.planCode || sub.plan_code ||
+              (sub.plan && (sub.plan.code || sub.plan.name)) || '—') + '</dd>' +
+            '<dt>Cycle ends</dt><dd>' + h(dateTime(sub.cycleEndAt || sub.cycle_end_at)) + '</dd>' +
+            (sub.cappedAmount || sub.capped_amount
+              ? '<dt>Capped amount</dt><dd class="money">' +
+                money(sub.cappedAmount || sub.capped_amount) + '</dd>' : '') +
+          '</dl></div></div>';
+
+      var rows = history.map(function (r) {
+        return '<tr><td>' + h(titleCase(r.kind || r.type || 'Charge')) + '</td>' +
+          '<td class="num money">' + money(r.amount) + '</td>' +
+          '<td>' + stateBadge(r.state) + '</td>' +
+          '<td class="muted">' + h(dateTime(r.createdAt || r.created_at)) + '</td></tr>';
+      }).join('');
+
+      view.innerHTML = '<div class="page-head"><h1>Plan &amp; billing</h1></div>' +
+        '<div class="stack">' + subCard +
+        '<div class="card"><div class="card-head"><h2>History</h2></div>' +
+        '<div class="card-body flush">' +
+        (rows ? '<div class="table-wrap"><table class="data"><thead><tr>' +
+          '<th>Item</th><th class="num">Amount</th><th>State</th><th>Date</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+              : empty('No charges yet')) +
+        '</div></div></div>';
+    });
+  }
+
+  // ADD-29/30 setup health: what is still unconfigured, and what it blocks.
+  function screenSetup() {
+    var view = document.getElementById('view');
+    view.innerHTML = '<div class="page-head"><h1>Setup</h1></div>' + loading();
+
+    api('/setup/health').then(function (d) {
+      var checks = unwrap(d) .length ? unwrap(d) : (d.checks || []);
+      var rows = checks.map(function (c) {
+        var ok = c.ok !== undefined ? c.ok
+               : String(c.state || '').toUpperCase() === 'OK';
+        return '<tr><td><strong>' + h(c.title || titleCase(c.key || c.code || '—')) + '</strong>' +
+          (c.detail ? '<div class="muted" style="font-size:12.5px">' + h(c.detail) + '</div>' : '') +
+          '</td><td>' + (ok ? '<span class="badge ok">Ready</span>'
+                            : '<span class="badge warn">Needs attention</span>') + '</td></tr>';
+      }).join('');
+
+      view.innerHTML = '<div class="page-head"><h1>Setup</h1>' +
+        '<span class="muted">What is still needed before you can ship</span></div>' +
+        '<div class="card"><div class="card-body flush">' +
+        (rows ? '<div class="table-wrap"><table class="data"><thead><tr>' +
+          '<th>Check</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+              : empty('Nothing to configure', 'Setup health reports no outstanding items.')) +
+        '</div></div>';
+    }).catch(function (err) {
+      if (err.message === 'unauthenticated') return;
+      view.innerHTML = '<div class="page-head"><h1>Setup</h1></div>' + errorCard(err);
+    });
+  }
+
   // ─── Router ───────────────────────────────────────────────────────────
   var ROUTES = {
     '': screenDashboard,
     'orders': function (arg) { return arg ? screenOrderDetail(arg) : screenOrders(); },
     'shipments': screenShipments,
+    'ndr': screenNdr,
+    'invoices': screenInvoices,
+    'recon-freight': screenReconFreight,
+    'recon-cod': screenReconCod,
+    'billing': screenBilling,
+    'rules': screenRules,
+    'rate-cards': screenRateCards,
     'couriers': screenCouriers,
+    'reports': screenReports,
+    'setup': screenSetup,
     'settings': screenSettings,
   };
 
