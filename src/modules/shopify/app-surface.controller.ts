@@ -1,6 +1,7 @@
 import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { SessionService } from '../../auth/session.service';
+import { installPage, page } from './install-pages';
 import { SESSION_COOKIE, SessionContext } from '../../auth/session.types';
 
 /**
@@ -59,21 +60,6 @@ export class AppSurfaceController {
 
 }
 
-function installPage(): string {
-  return page(
-    'Install Jsyxi Shipping',
-    `<h1>Install Jsyxi Shipping</h1>
-     <p class="lede">Enter your store domain to begin the Shopify install.</p>
-     <form method="get" action="/shopify/install">
-       <label for="shop">Store domain</label>
-       <input id="shop" name="shop" type="text" required
-              placeholder="your-store.myshopify.com"
-              pattern="[a-zA-Z0-9][a-zA-Z0-9-]*\\.myshopify\\.com" />
-       <button type="submit">Install</button>
-     </form>`,
-  );
-}
-
 /**
  * Exchanges ?token= for the session cookie. Kept dependency-free and inline so
  * it works under the strict transport posture (§5.7 control 2) with no assets.
@@ -128,47 +114,6 @@ const ENTRY_PAGE = page(
      })();
    </script>`,
 );
-
-function page(title: string, body: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(title)}</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-         font: 16px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-         background: Canvas; color: CanvasText; }
-  main { width: min(34rem, 92vw); padding: 2.5rem 0; }
-  h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
-  .lede { margin: 0 0 1.5rem; opacity: .75; }
-  .note { font-size: .875rem; opacity: .7; }
-  dl { display: grid; grid-template-columns: auto 1fr; gap: .5rem 1.5rem; margin: 0 0 1.5rem; }
-  dt { opacity: .65; } dd { margin: 0; font-variant-numeric: tabular-nums; }
-  form { display: grid; gap: .5rem; }
-  label { font-size: .875rem; opacity: .75; }
-  input, button { font: inherit; padding: .6rem .75rem; border-radius: .5rem;
-                  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); }
-  input { background: Canvas; color: CanvasText; }
-  button { cursor: pointer; border-color: transparent;
-           background: color-mix(in srgb, CanvasText 88%, Canvas); color: Canvas; }
-</style>
-</head>
-<body><main>${body}</main></body>
-</html>`;
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (c) =>
-    c === '&' ? '&amp;'
-      : c === '<' ? '&lt;'
-        : c === '>' ? '&gt;'
-          : c === '"' ? '&quot;'
-            : '&#39;',
-  );
-}
 
 function readCookie(header: string | undefined, name: string): string | null {
   if (!header) return null;

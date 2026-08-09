@@ -2,6 +2,7 @@ import { Controller, Get, Query, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { ShopifyOAuthError, ShopifyOAuthService } from './oauth.service';
+import { installErrorPage } from './install-pages';
 
 /** §9.1.1: OAuth install flow endpoints. */
 @Controller('shopify')
@@ -37,9 +38,19 @@ export class ShopifyOAuthController {
     }
   }
 
+  /**
+   * Both routes are reached by browser redirect from Shopify, so the response
+   * is rendered to a merchant — not parsed by a client. A JSON body here is a
+   * dead end: it names a condition without saying what to do about it. The
+   * status code is unchanged, so anything scripted against these routes still
+   * sees the same contract.
+   */
   private respondError(res: Response, err: unknown): void {
     if (err instanceof ShopifyOAuthError) {
-      res.status(statusFor(err.code)).json({ error: err.code, message: err.message });
+      res
+        .status(statusFor(err.code))
+        .type('html')
+        .send(installErrorPage(err.code, err.message));
       return;
     }
     throw err;
