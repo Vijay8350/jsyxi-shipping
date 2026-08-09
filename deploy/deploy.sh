@@ -50,11 +50,33 @@ fi
 
 log "Uploading source to release $RELEASE"
 "${SSH[@]}" "sudo mkdir -p $TARGET && sudo chown $SSH_USER:$SSH_USER $TARGET"
-rsync -az --delete \
-  -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new" \
-  --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
-  --exclude 'var' --exclude '.env' --exclude '*.pem' --exclude '*.log' \
-  ./ "$SSH_USER@$HOST:$TARGET/"
+
+# Each release is a fresh empty directory, so there is nothing to delta against
+# and nothing to --delete. rsync is nicer when present, but Git Bash on Windows
+# ships tar and not rsync, so fall back to streaming a tarball over the same SSH
+# connection. Excludes are identical in both paths — keep them in sync, and note
+# that .env / *.pem / keys must never leave the workstation.
+EXCLUDES=(
+  --exclude='.git' --exclude='node_modules' --exclude='dist'
+  --exclude='var' --exclude='.env' --exclude='.env.production'
+  --exclude='*.pem' --exclude='*.log'
+  --exclude='jsyxi-deploy-key' --exclude='jsyxi-deploy-key.pub'
+  --exclude='.shopify'
+)
+if command -v rsync >/dev/null 2>&1; then
+  rsync -az --delete -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new" \
+    "${EXCLUDES[@]}" ./ "$SSH_USER@$HOST:$TARGET/"
+else
+  echo "  rsync unavailable — streaming tar over ssh"
+  tar czf - "${EXCLUDES[@]}" . | "${SSH[@]}" "tar xzf - -C $TARGET"
+fi
+
+# The secrets live only in shared/.env; prove none rode along in the payload.
+if "${SSH[@]}" "test -e $TARGET/.env -o -e $TARGET/.env.production -o -n \"\$(find $TARGET -maxdepth 1 -name '*.pem' -print -quit)\""; then
+  echo "ABORT: a secret file reached the release directory" >&2
+  "${SSH[@]}" "sudo rm -rf $TARGET"
+  exit 1
+fi
 
 log "Installing dependencies and building"
 "${SSH[@]}" "cd $TARGET && npm ci --no-audit --no-fund && npm run build"
@@ -95,6 +117,15 @@ log "Pruning old releases (keeping 5)"
 "${SSH[@]}" "cd $APP_ROOT/releases && ls -1dt */ | tail -n +6 | xargs -r sudo rm -rf"
 
 log "Verifying public endpoint"
-curl -fsS "https://app.jsyxi.com/healthz" && echo
+# Informational only: until the security group opens 80/443 and certbot has run,
+# there is nothing to answer publicly. The release is already proven healthy by
+# the /readyz gate above, so a failure here must not fail the deploy.
+if curl -fsS --max-time 10 "https://app.jsyxi.com/healthz" 2>/dev/null; then
+  echo " — public HTTPS OK"
+elif curl -fsS --max-time 10 "http://app.jsyxi.com/healthz" 2>/dev/null; then
+  echo " — public HTTP OK (TLS not issued yet)"
+else
+  echo "  not publicly reachable yet — open 80/443 in the security group, then run certbot"
+fi
 
 log "Deployed release $RELEASE"

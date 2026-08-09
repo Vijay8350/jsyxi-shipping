@@ -110,9 +110,17 @@ describe('dispute export (§9.17.2)', () => {
     expect(bytes).not.toBeNull();
     expect(bytes!.toString('utf8')).toContain('DL0087412391');
 
-    // Bad signature.
+    // Bad signature. The flip must be conditional: the signature is hex, so
+    // forcing the last character to '0' is a no-op 1 time in 16 — the "tampered"
+    // signature is then the real one and the read correctly succeeds, failing
+    // this assertion at random. Same guard as the OAuth HMAC test.
     expect(
-      await service.readExport({ shopId: SHOP_ID, key, expires, signature: signature.replace(/.$/, '0') }),
+      await service.readExport({
+        shopId: SHOP_ID,
+        key,
+        expires,
+        signature: signature.replace(/.$/, signature.endsWith('0') ? '1' : '0'),
+      }),
     ).toBeNull();
     // Another Shop's session can never read it (INV-1).
     expect(

@@ -25,7 +25,24 @@ log() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 log "Base packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg rsync ufw ca-certificates
+apt-get install -y -qq ca-certificates curl gnupg rsync ufw postgresql-client
+
+# The app host is a t3.micro: ~900 MB RAM and no swap by default. `npm ci`
+# plus tsc over this codebase peaks well above that and the OOM killer takes
+# the build out mid-compile, which surfaces as a confusing "Killed" with no
+# error. A 2 GB swapfile makes the build reliable; it is slower, not fatal.
+log "Swap"
+if ! swapon --show | grep -q '/swapfile'; then
+  fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  # Prefer RAM; swap is a safety net for build spikes, not a working set.
+  sysctl -w vm.swappiness=10 >/dev/null
+  grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+fi
+free -h | awk '/^Mem:|^Swap:/ {print "  "$0}'
 
 log "Node ${NODE_MAJOR}"
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v)" != v${NODE_MAJOR}.* ]]; then
@@ -49,6 +66,16 @@ grep -q '^bind 127.0.0.1' /etc/redis/redis.conf \
   || sed -i 's/^bind .*/bind 127.0.0.1 ::1/' /etc/redis/redis.conf
 systemctl enable --now redis-server
 systemctl restart redis-server
+
+log "AWS RDS CA bundle"
+# node-postgres now treats sslmode=require as verify-full, so the RDS chain has
+# to be trustable or every connection dies with SELF_SIGNED_CERT_IN_CHAIN. The
+# connection strings point at this file via ?sslrootcert=. Verifying properly
+# beats the usual "just disable TLS verification" workaround.
+curl -fsSL -o /etc/ssl/certs/rds-global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+chmod 644 /etc/ssl/certs/rds-global-bundle.pem
+echo "  $(grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/rds-global-bundle.pem) certificates"
 
 log "nginx + certbot"
 apt-get install -y -qq nginx certbot python3-certbot-nginx
@@ -76,7 +103,33 @@ ln -sfn "../sites-available/$DOMAIN" "/etc/nginx/sites-enabled/$DOMAIN"
 rm -f /etc/nginx/sites-enabled/default
 
 log "TLS certificate for $DOMAIN"
-if [[ ! -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
+# Let's Encrypt validates over HTTP-01, so port 80 must be reachable from the
+# internet. If the security group has not opened it yet, issuing would burn a
+# rate-limited failure — so skip and leave the site on :80 until it is open.
+# Re-run this script (or `certbot --nginx -d $DOMAIN`) once 80/443 are allowed.
+if [[ "${SKIP_TLS:-0}" == "1" ]]; then
+  log "SKIP_TLS=1 — serving plain HTTP on :80 for now, no certificate issued"
+  cat > "/etc/nginx/sites-available/$DOMAIN.bootstrap" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              \$host;
+        proxy_set_header X-Real-IP         \$remote_addr;
+        proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_request_buffering off;
+        proxy_buffering off;
+    }
+}
+EOF
+  ln -sfn "../sites-available/$DOMAIN.bootstrap" "/etc/nginx/sites-enabled/$DOMAIN.bootstrap"
+  rm -f "/etc/nginx/sites-enabled/$DOMAIN"
+  nginx -t && systemctl reload nginx
+elif [[ ! -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
   # The site config references certs that do not exist yet, so issue standalone
   # against the webroot with nginx briefly serving :80 only.
   cat > "/etc/nginx/sites-available/$DOMAIN.bootstrap" <<EOF
