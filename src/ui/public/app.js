@@ -1012,17 +1012,119 @@
     });
   }
 
+  /**
+   * Where each courier's credentials come from.
+   *
+   * A merchant connecting a courier is holding a contract, not an API doc —
+   * "API token" alone does not tell them which of the several values their
+   * account manager sent is the right one. These describe WHAT the value is
+   * and WHO issues it, which stays true even when a courier reshuffles its
+   * portal menus. Exact menu names are deliberately not asserted.
+   *
+   * Server-side guides (courier_guide, editable by staff) take precedence when
+   * present; this is the fallback so the form is never unexplained.
+   */
+  var CREDENTIAL_GUIDE = {
+    DELHIVERY: {
+      where: 'Issued with your Delhivery API contract. Your Delhivery account ' +
+        'manager provides it, and it is also shown in the Delhivery One portal ' +
+        'under the API/integration settings.',
+      fields: {
+        api_token: 'The long API token (sometimes called the API key). Paste it whole — no "Token" prefix.',
+        pickup_code: 'The warehouse / client name exactly as registered with Delhivery. ' +
+          'It must match character-for-character or bookings are rejected.',
+      },
+    },
+    BLUEDART: {
+      where: 'From your Blue Dart API gateway registration. Blue Dart issues these ' +
+        'when your account is enabled for API access.',
+      fields: {
+        client_id: 'The consumer key from the Blue Dart API gateway (ClientID / ConsumerKey).',
+        client_secret: 'The consumer secret paired with that key. Blue Dart shows it once at registration.',
+        pickup_code: 'Your registered Blue Dart customer code for the pickup location — ' +
+          'the code on your Blue Dart contract, not our internal id.',
+      },
+    },
+    DTDC: {
+      where: 'From your DTDC API onboarding. DTDC issues an access token per customer account.',
+      fields: {
+        api_key: 'The access token DTDC issues for the consignment API (sent as X-Access-Token).',
+        pickup_code: 'Your DTDC-registered customer code.',
+      },
+    },
+    XPRESSBEES: {
+      where: 'The same credentials you use to sign in to the Xpressbees dashboard. ' +
+        'If your account has a separate API user, use that one.',
+      fields: {
+        email: 'Your Xpressbees login email.',
+        password: 'Your Xpressbees password. It is encrypted before storage and never shown again.',
+        pickup_code: 'The warehouse name exactly as registered in Xpressbees.',
+      },
+    },
+    SHADOWFAX: {
+      where: 'From your Shadowfax merchant onboarding — your account manager issues the API key.',
+      fields: {
+        api_key: 'The Shadowfax API key for your merchant account.',
+        pickup_code: 'Your Shadowfax pickup location code.',
+      },
+    },
+    SHIPROCKET: {
+      where: 'Shiprocket is an aggregator: these are your Shiprocket account credentials, ' +
+        'and Shiprocket holds the courier contracts behind it.',
+      fields: {
+        email: 'Your Shiprocket login email.',
+        password: 'Your Shiprocket password.',
+        shiprocket_courier_map: 'Optional routing map for Shiprocket’s nested couriers. ' +
+          'Leave empty unless you have been given one.',
+        pickup_code: 'The pickup location nickname registered in Shiprocket.',
+      },
+    },
+    AMAZON_SHIPPING: {
+      where: 'From Amazon Seller Central → Apps & Services → Develop Apps (Login with Amazon). ' +
+        'You need a developer profile before these exist.',
+      fields: {
+        client_id: 'The LWA application client ID.',
+        client_secret: 'The LWA application client secret.',
+        refresh_token: 'The refresh token from authorising the app against your selling account.',
+        pickup_code: 'The ship-from address ID registered with Amazon.',
+      },
+    },
+  };
+
   /** Renders one credential field from the courier's own schema. */
-  function credentialField(f) {
+  function credentialField(f, courierCode) {
     var id = 'cred_' + f.key;
-    return '<label for="' + h(id) + '">' + h(f.label || f.key) +
-      (f.isRequired ? '' : ' <span class="muted">(optional)</span>') + '</label>' +
+    var guide = CREDENTIAL_GUIDE[courierCode];
+    var hint = guide && guide.fields ? guide.fields[f.key] : null;
+    return '<div>' +
+      '<label for="' + h(id) + '">' + h(f.label || f.key) +
+        (f.isRequired ? '' : ' <span class="muted">(optional)</span>') + '</label>' +
       '<input class="input" id="' + h(id) + '" data-key="' + h(f.key) + '"' +
         // Secrets are write-only (§5.7 control 3) — never prefilled, never
         // echoed back, and masked while typing.
         ' type="' + (f.isSecret ? 'password' : 'text') + '"' +
-        ' autocomplete="off" spellcheck="false"' +
-        (f.isRequired ? ' required' : '') + ' />';
+        ' autocomplete="off" spellcheck="false" style="width:100%"' +
+        (f.isRequired ? ' required' : '') + ' />' +
+      (hint ? '<div class="muted" style="font-size:12px;margin-top:3px">' + h(hint) + '</div>' : '') +
+      '</div>';
+  }
+
+  /** The "where do I get these?" panel above the fields. */
+  function credentialGuideBlock(courier) {
+    var g = CREDENTIAL_GUIDE[courier.code] || {};
+    // A staff-published guide (courier_guide) outranks the built-in copy.
+    var srv = courier.guide || {};
+    var links = [];
+    if (srv.docUrl) links.push('<a href="' + h(srv.docUrl) + '" target="_blank" rel="noopener">Setup guide</a>');
+    if (srv.videoUrl) links.push('<a href="' + h(srv.videoUrl) + '" target="_blank" rel="noopener">Video walkthrough</a>');
+
+    if (!g.where && !links.length) return '';
+    return '<div class="banner" style="background:var(--surface-sunk);border-color:var(--border);' +
+      'margin-bottom:14px"><div>' +
+      '<strong>Where to find these</strong><br>' +
+      (g.where ? h(g.where) : '') +
+      (links.length ? '<div style="margin-top:6px">' + links.join(' · ') + '</div>' : '') +
+      '</div></div>';
   }
 
   function collectCredentials(scope) {
@@ -1044,13 +1146,7 @@
         'Enter the API credentials from your ' + h(courier.name) + ' contract. ' +
         'They are encrypted before storage and never shown again (§5.7).' +
       '</p>' +
-      (courier.guide && (courier.guide.url || courier.guide.text)
-        ? '<p class="muted" style="font-size:12.5px">' +
-          (courier.guide.url
-            ? 'Where to find these: <a href="' + h(courier.guide.url) + '" target="_blank" rel="noopener">' +
-              h(courier.guide.url) + '</a>'
-            : h(courier.guide.text)) + '</p>'
-        : '') +
+      credentialGuideBlock(courier) +
       /* §9.3.3 defaults to TEST. A live courier account books real parcels and
          spends real money — opting into that should be deliberate. */
       '<div style="display:grid;gap:8px;margin:14px 0">' +
@@ -1064,7 +1160,7 @@
       '</div>' +
       (fields.length
         ? '<form id="credform" style="display:grid;gap:10px">' +
-          fields.map(credentialField).join('') + '</form>'
+          fields.map(function (f) { return credentialField(f, courier.code); }).join('') + '</form>'
         : '<div class="banner warn"><div>This courier has no credential schema configured, ' +
           'so it cannot be connected yet.</div></div>');
 
@@ -1238,7 +1334,7 @@
         '<p class="muted" style="font-size:12.5px;margin-top:0">' +
           'Stored credentials cannot be displayed (§5.7). Entering new values replaces them.</p>' +
         (fields.length
-          ? '<form id="credform" style="display:grid;gap:10px">' + fields.map(credentialField).join('') + '</form>'
+          ? '<form id="credform" style="display:grid;gap:10px">' + fields.map(function (f) { return credentialField(f, courier.code); }).join('') + '</form>'
           : '');
 
       back.querySelector('.modal').insertAdjacentHTML('beforeend',

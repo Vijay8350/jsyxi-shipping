@@ -64,6 +64,8 @@ export class AdminAuthService {
   private readonly cipher: EnvelopeCipher;
   private readonly piiSalt: string;
   private readonly totp: typeof authenticator;
+  /** §10.3 MFA policy — true unless ADMIN_REQUIRE_TOTP=false. */
+  private readonly requireTotp: boolean;
 
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
@@ -73,6 +75,8 @@ export class AdminAuthService {
     this.cipher = EnvelopeCipher.fromHex(config.get<string>('crypto.masterKeyHex') ?? '');
     this.piiSalt = config.get<string>('crypto.piiHashSalt') ?? '';
     this.totp = authenticator.clone({ window: ADMIN_TOTP_WINDOW });
+    // Fails safe: anything other than an explicit false keeps MFA required.
+    this.requireTotp = config.get<boolean>('admin.requireTotp') !== false;
   }
 
   /** Salted IP hash for audit rows (§5.7 control 4). */
@@ -262,14 +266,30 @@ export class AdminAuthService {
     const passwordOk = await argon2.verify(admin.password_hash, dto.password);
     if (!passwordOk) return fail('invalid_credentials', admin.admin_id);
 
-    // Mandatory MFA (§10.3): no password-only login, ever.
-    if (!admin.totp_confirmed) return fail('totp_not_enrolled', admin.admin_id);
-    if (!dto.totpCode) return fail('totp_required', admin.admin_id);
-    const secret = this.cipher
-      .decrypt(admin.totp_secret_encrypted as Buffer)
-      .toString('utf8');
-    if (!this.totp.verify({ token: dto.totpCode, secret })) {
-      return fail('totp_invalid', admin.admin_id);
+    /**
+     * MFA (§10.3). Required by default; an operator may opt out with
+     * ADMIN_REQUIRE_TOTP=false, which is a deliberate reduction in protection
+     * for a console that can read every merchant's data.
+     *
+     * Even when not required, an admin who HAS enrolled still gets their code
+     * verified — opting out lowers the floor for accounts without MFA, it does
+     * not disable MFA for accounts that have it. And a supplied code is always
+     * checked rather than ignored, so a wrong code never silently passes.
+     */
+    let usedTotp = false;
+    if (this.requireTotp) {
+      if (!admin.totp_confirmed) return fail('totp_not_enrolled', admin.admin_id);
+      if (!dto.totpCode) return fail('totp_required', admin.admin_id);
+    }
+    if (admin.totp_confirmed && (this.requireTotp || dto.totpCode)) {
+      if (!dto.totpCode) return fail('totp_required', admin.admin_id);
+      const secret = this.cipher
+        .decrypt(admin.totp_secret_encrypted as Buffer)
+        .toString('utf8');
+      if (!this.totp.verify({ token: dto.totpCode, secret })) {
+        return fail('totp_invalid', admin.admin_id);
+      }
+      usedTotp = true;
     }
 
     const sessionToken = randomToken(32);
@@ -289,7 +309,9 @@ export class AdminAuthService {
       action: 'admin_login.success',
       objectType: 'admin_user',
       objectId: admin.admin_id,
-      after: { method: 'password+totp' },
+      // §12: record what actually happened. An audit row that always claimed
+      // 'password+totp' would hide exactly the logins worth reviewing.
+      after: { method: usedTotp ? 'password+totp' : 'password_only' },
       ipHash,
     });
     return {
