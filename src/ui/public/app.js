@@ -1478,14 +1478,82 @@
                 '</dl>') +
           '</div></div>' +
           '<div class="card"><div class="card-head"><h2>Team</h2><div class="spacer"></div>' +
-            '<span class="muted" style="font-size:12.5px">' + num(members.length) + ' member(s)</span></div>' +
+            '<span class="muted" style="font-size:12.5px">' + num(members.length) + ' member(s)</span>' +
+            '<button class="btn sm primary" id="invite">Invite member</button></div>' +
             '<div class="card-body flush">' +
             (memberRows ? '<div class="table-wrap"><table class="data"><thead><tr>' +
               '<th>Member</th><th>Role</th><th>Auth</th><th>Last active</th>' +
               '</tr></thead><tbody>' + memberRows + '</tbody></table></div>'
                         : empty('No team members visible', 'Requires the team.manage permission.')) +
             '</div></div>' +
+          '<p class="muted" style="font-size:12.5px">Invited members sign in at ' +
+            '<a href="/login">/login</a> with their own email and password, and see only ' +
+            'what their role allows (§10.2).</p>' +
         '</div>';
+
+      var inv = document.getElementById('invite');
+      if (inv) inv.addEventListener('click', function () { openInvite(screenSettings); });
+    });
+  }
+
+  /**
+   * OVR-1: give a colleague their own credentials. The invite endpoint returns
+   * the token directly, so the link is shown once here for the Owner to pass
+   * on — there is no mail transport wired for it yet, and pretending an email
+   * went out would leave the invitee waiting for nothing.
+   */
+  function openInvite(onDone) {
+    var back = modal('Invite a team member',
+      '<form id="invf" style="display:grid;gap:12px">' +
+        '<div><label for="iemail">Email</label>' +
+          '<input class="input" id="iemail" type="email" required style="width:100%" ' +
+            'placeholder="colleague@yourstore.com" /></div>' +
+        '<div><label for="irole">Role</label>' +
+          '<select class="input" id="irole" style="width:100%">' +
+            '<option value="OPERATOR">Operator — book and manage shipments</option>' +
+            '<option value="FINANCE">Finance — billing and reconciliation</option>' +
+            '<option value="VIEWER">Viewer — read only</option>' +
+          '</select>' +
+          // OVR-1 / DB CHECK: a native member can never be Owner.
+          '<div class="muted" style="font-size:12px;margin-top:3px">' +
+            'Owner cannot be granted to an invited member — it stays with the ' +
+            'Shopify account that installed the app.</div></div>' +
+      '</form><div id="invout"></div>',
+      '<span id="invmsg" class="muted"></span><div class="spacer"></div>' +
+      '<button class="btn" data-close>Cancel</button>' +
+      '<button class="btn primary" id="invsend">Create invite</button>');
+
+    back.querySelector('#invsend').addEventListener('click', function () {
+      var form = back.querySelector('#invf');
+      if (!form.reportValidity()) return;
+      var btn = back.querySelector('#invsend');
+      btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Creating';
+
+      api('/auth/native/invites', {
+        method: 'POST',
+        body: {
+          email: back.querySelector('#iemail').value.trim(),
+          role: back.querySelector('#irole').value,
+        },
+      }).then(function (r) {
+        var token = r && (r.devHandoffToken || r.token);
+        var link = window.location.origin + '/invite?token=' + encodeURIComponent(token || '');
+        back.querySelector('#invout').innerHTML =
+          '<div class="banner" style="background:var(--surface-sunk);border-color:var(--border);' +
+          'margin-top:14px"><div><strong>Invite created.</strong> Send this link to them — ' +
+          'it expires, and it is shown only once:' +
+          '<input class="input mono" readonly style="width:100%;font-size:12px;margin-top:8px" ' +
+            'value="' + h(link) + '" /></div></div>';
+        btn.disabled = false; btn.textContent = 'Create another';
+        if (onDone) setTimeout(onDone, 0);
+      }).catch(function (err) {
+        if (err.message === 'unauthenticated') return;
+        btn.disabled = false; btn.textContent = 'Create invite';
+        var b = err.body || {};
+        var m = Array.isArray(b.message) ? b.message.join(' · ') : (b.message || err.message);
+        back.querySelector('#invmsg').innerHTML =
+          '<span style="color:var(--bad-fg)">' + h(String(m)) + '</span>';
+      });
     });
   }
 

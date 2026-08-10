@@ -73,6 +73,170 @@ export function installPage(): string {
   );
 }
 
+/**
+ * OVR-1 native sign-in. A shop's team members each hold their own credentials
+ * rather than sharing the Shopify staff entry, so this is a second door into
+ * the same console — the session it mints is identical, and §10.2 role checks
+ * apply exactly as they do to a Shopify-staff session.
+ *
+ * Login is shop-scoped (INV-1), so the store domain is part of the form: the
+ * same email may legitimately be a member of more than one shop.
+ */
+export function nativeLoginPage(): string {
+  return page(
+    'Sign in — Jsyxi Shipping',
+    `<h1>Sign in</h1>
+     <p class="lede">For team members with their own Jsyxi credentials.</p>
+     <form id="f">
+       <label for="shop">Store domain</label>
+       <input id="shop" name="shop" type="text" required autocomplete="organization"
+              placeholder="your-store.myshopify.com" />
+       <label for="email">Email</label>
+       <input id="email" name="email" type="email" required autocomplete="username" />
+       <label for="password">Password</label>
+       <input id="password" name="password" type="password" required autocomplete="current-password" />
+       <label for="code">Authenticator code <span class="note">(if set up)</span></label>
+       <input id="code" name="code" inputmode="numeric" maxlength="6" placeholder="123456"
+              autocomplete="one-time-code" />
+       <button type="submit">Sign in</button>
+     </form>
+     <p class="note" id="msg"></p>
+     <p class="note">Store owners sign in through Shopify — <a href="/">install or open the app</a>.</p>
+     <script>
+       document.getElementById('f').addEventListener('submit', function (e) {
+         e.preventDefault();
+         var btn = e.target.querySelector('button');
+         var msg = document.getElementById('msg');
+         btn.disabled = true; btn.textContent = 'Signing in…'; msg.textContent = '';
+         var body = {
+           shopDomain: document.getElementById('shop').value.trim(),
+           email: document.getElementById('email').value.trim(),
+           password: document.getElementById('password').value
+         };
+         var code = document.getElementById('code').value.trim();
+         if (code) body.totpCode = code;
+         fetch('/auth/native/login', {
+           method: 'POST', credentials: 'same-origin',
+           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+         }).then(function (r) {
+           return r.json().catch(function () { return {}; }).then(function (b) {
+             if (!r.ok) throw new Error(b.message || b.status || 'Sign-in failed');
+             return b;
+           });
+         }).then(function () { window.location.replace('/app/'); })
+           .catch(function (err) {
+             btn.disabled = false; btn.textContent = 'Sign in';
+             msg.textContent = err.message;
+           });
+       });
+     </script>`,
+  );
+}
+
+/**
+ * Invite acceptance: the invitee chooses their own password, which is the
+ * moment their separate identity comes into existence. The token is read from
+ * the query string in the browser and never interpolated into the HTML.
+ */
+export function acceptInvitePage(): string {
+  return page(
+    'Accept your invitation — Jsyxi Shipping',
+    `<h1>Set your password</h1>
+     <p class="lede">You have been invited to a Jsyxi Shipping account. Choose a
+     password to finish setting up your own sign-in.</p>
+     <form id="f">
+       <label for="password">Password</label>
+       <input id="password" name="password" type="password" required minlength="12"
+              autocomplete="new-password" />
+       <label for="confirm">Confirm password</label>
+       <input id="confirm" name="confirm" type="password" required minlength="12"
+              autocomplete="new-password" />
+       <button type="submit">Create my sign-in</button>
+     </form>
+     <p class="note" id="msg"></p>
+     <script>
+       document.getElementById('f').addEventListener('submit', function (e) {
+         e.preventDefault();
+         var msg = document.getElementById('msg');
+         var pw = document.getElementById('password').value;
+         if (pw !== document.getElementById('confirm').value) {
+           msg.textContent = 'The two passwords do not match.'; return;
+         }
+         var token = new URLSearchParams(window.location.search).get('token');
+         if (!token) { msg.textContent = 'This invitation link is incomplete.'; return; }
+         var btn = e.target.querySelector('button');
+         btn.disabled = true; btn.textContent = 'Setting up…'; msg.textContent = '';
+         fetch('/auth/native/invites/accept', {
+           method: 'POST', credentials: 'same-origin',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ token: token, password: pw })
+         }).then(function (r) {
+           return r.json().catch(function () { return {}; }).then(function (b) {
+             if (!r.ok) throw new Error(b.message || b.status || 'Could not accept the invitation');
+             return b;
+           });
+         }).then(function () {
+           // Accept issues a session, but OVR-1 blocks future PASSWORD logins
+           // until TOTP is confirmed. Sending them to the console here would
+           // work once and then lock them out, so enrolment happens now while
+           // the session exists.
+           return enrolTotp();
+         }).catch(function (err) {
+           btn.disabled = false; btn.textContent = 'Create my sign-in';
+           msg.textContent = err.message;
+         });
+       });
+
+       function enrolTotp() {
+         return fetch('/auth/native/totp/enroll', {
+           method: 'POST', credentials: 'same-origin'
+         }).then(function (r) {
+           return r.json().catch(function () { return {}; }).then(function (b) {
+             if (!r.ok) throw new Error(b.message || 'Could not start two-factor setup');
+             return b;
+           });
+         }).then(function (b) {
+           var secret = (String(b.otpauthUri).match(/[?&]secret=([^&]+)/) || [])[1] || '';
+           document.querySelector('main').innerHTML =
+             '<h1>One more step</h1>' +
+             '<p class="lede">Add this to an authenticator app. It is required every ' +
+             'time you sign in.</p>' +
+             '<p class="note">Key: <code id="sec"></code></p>' +
+             '<form id="cf">' +
+               '<label for="code">6-digit code</label>' +
+               '<input id="code" inputmode="numeric" maxlength="6" required ' +
+                 'autocomplete="one-time-code" placeholder="123456" />' +
+               '<button type="submit">Finish</button>' +
+             '</form><p class="note" id="m2"></p>';
+           // textContent, not innerHTML — the secret is data, not markup.
+           document.getElementById('sec').textContent = secret;
+           document.getElementById('cf').addEventListener('submit', function (ev) {
+             ev.preventDefault();
+             var b2 = ev.target.querySelector('button');
+             var m2 = document.getElementById('m2');
+             b2.disabled = true; b2.textContent = 'Checking…'; m2.textContent = '';
+             fetch('/auth/native/totp/confirm', {
+               method: 'POST', credentials: 'same-origin',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ code: document.getElementById('code').value.trim() })
+             }).then(function (r) {
+               if (!r.ok) {
+                 return r.json().catch(function () { return {}; }).then(function (b3) {
+                   throw new Error(b3.message || 'That code was not accepted');
+                 });
+               }
+               window.location.replace('/app/');
+             }).catch(function (e) {
+               b2.disabled = false; b2.textContent = 'Finish';
+               m2.textContent = e.message;
+             });
+           });
+         });
+       }
+     </script>`,
+  );
+}
+
 interface ErrorCopy {
   title: string;
   lede: string;

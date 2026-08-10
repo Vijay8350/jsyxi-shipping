@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { SessionService } from '../../auth/session.service';
-import { installPage, page } from './install-pages';
+import { acceptInvitePage, installPage, nativeLoginPage, page } from './install-pages';
 import { SESSION_COOKIE, SessionContext } from '../../auth/session.types';
 
 /**
@@ -45,6 +45,18 @@ export class AppSurfaceController {
     }
 
     res.type('html').send(installPage());
+  }
+
+  /** OVR-1: sign-in for team members holding their own credentials. */
+  @Get('login')
+  login(@Res() res: Response): void {
+    res.type('html').send(nativeLoginPage());
+  }
+
+  /** OVR-1: an invitee sets their password here. */
+  @Get('invite')
+  invite(@Res() res: Response): void {
+    res.type('html').send(acceptInvitePage());
   }
 
   @Get('entry')

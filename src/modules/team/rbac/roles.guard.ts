@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { AuthenticatedRequest } from '../../../auth/session.guard';
 import { PERMISSION_KEY } from './requires-permission.decorator';
-import { hasPermission, PERMISSIONS, PermissionKey } from './permissions';
+import { canRead, hasPermission, PERMISSIONS, PermissionKey } from './permissions';
 
 /**
  * §10 RBAC guard. Runs AFTER SessionGuard and authorizes purely on
@@ -41,9 +41,29 @@ export class RolesGuard implements CanActivate {
       // Programming error: a permission name that is not in §10.2.
       throw new Error(`unknown permission '${String(key)}'`);
     }
-    if (!hasPermission(session.role, key)) {
+    /**
+     * §10.2 distinguishes `✓` (may act) from `R` (may read only), and the
+     * catalog encodes both — `allow` and `readOnly`. Checking `allow` alone
+     * collapsed that distinction and denied every `R` role outright, which
+     * made Viewer unable to view anything: it holds `R` on orders.view and
+     * nothing else, so it was locked out of the product entirely.
+     *
+     * A safe method reads; anything else writes. GET/HEAD/OPTIONS therefore
+     * consult canRead, and every mutation still requires `allow`, so this
+     * grants exactly what the matrix already said and nothing more.
+     */
+    // Absent method is treated as a WRITE, not a read: a guard that cannot
+    // tell what it is authorizing must choose the stricter branch.
+    const method = String(req.method ?? '').toUpperCase();
+    const isRead = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+    const permitted = isRead
+      ? canRead(session.role, key)
+      : hasPermission(session.role, key);
+
+    if (!permitted) {
       throw new ForbiddenException(
-        `role ${session.role} lacks permission '${String(key)}'`,
+        `role ${session.role} lacks permission '${String(key)}'` +
+          (isRead ? '' : ' for this action'),
       );
     }
     return true;

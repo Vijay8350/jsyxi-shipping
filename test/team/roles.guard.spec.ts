@@ -9,12 +9,15 @@ import { SessionContext } from '../../src/auth/session.types';
 import { RolesGuard } from '../../src/modules/team/rbac/roles.guard';
 import { PermissionKey } from '../../src/modules/team/rbac/permissions';
 
-function contextWith(session?: Partial<SessionContext>): ExecutionContext {
+function contextWith(
+  session?: Partial<SessionContext>,
+  method?: string,
+): ExecutionContext {
   return {
     getHandler: () => ({}),
     getClass: () => ({}),
     switchToHttp: () => ({
-      getRequest: () => ({ session }),
+      getRequest: () => ({ session, method }),
     }),
   } as unknown as ExecutionContext;
 }
@@ -60,11 +63,34 @@ describe('RolesGuard (§10)', () => {
     );
   });
 
-  it('read-only (R) roles do not pass the full-permission check', () => {
-    const guard = guardWith('rules.edit'); // Viewer has R, not ✓
+  it('read-only (R) roles may READ but not WRITE (§10.2 R vs ✓)', () => {
+    const guard = guardWith('rules.edit'); // Viewer has R, Operator has ✓
+    // R means readable: denying this locked Viewer out of the product, since
+    // it holds R and nothing else.
+    expect(guard.canActivate(contextWith({ role: 'VIEWER' }, 'GET'))).toBe(true);
+    expect(guard.canActivate(contextWith({ role: 'VIEWER' }, 'HEAD'))).toBe(true);
+    // …but never writable.
+    for (const m of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(() =>
+        guard.canActivate(contextWith({ role: 'VIEWER' }, m)),
+      ).toThrow(ForbiddenException);
+    }
+    expect(guard.canActivate(contextWith({ role: 'OPERATOR' }, 'POST'))).toBe(true);
+  });
+
+  it('treats an unknown method as a write — the guard fails safe', () => {
+    const guard = guardWith('rules.edit');
     expect(() =>
       guard.canActivate(contextWith({ role: 'VIEWER' })),
     ).toThrow(ForbiddenException);
-    expect(guard.canActivate(contextWith({ role: 'OPERATOR' }))).toBe(true);
+  });
+
+  it('a deny row (—) rejects every role, Owner included, on reads too', () => {
+    const guard = guardWith('credentials.read');
+    for (const role of ['OWNER', 'OPERATOR', 'FINANCE', 'VIEWER'] as const) {
+      expect(() =>
+        guard.canActivate(contextWith({ role }, 'GET')),
+      ).toThrow(ForbiddenException);
+    }
   });
 });
