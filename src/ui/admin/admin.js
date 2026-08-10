@@ -575,6 +575,22 @@
    * assign/transition because the ticket row is optimistically locked; acting
    * on a stale version must fail rather than silently overwrite a colleague.
    */
+  function renderAttachments(list) {
+    var items = Array.isArray(list) ? list : [];
+    if (!items.length) return '';
+    return '<div class="row" style="gap:8px;margin-top:8px">' + items.map(function (a) {
+      var url = '/admin/support/attachments?key=' + encodeURIComponent(a.key);
+      var name = a.filename || String(a.key).split('/').pop();
+      var isImage = /.(png|jpe?g|gif|webp)$/i.test(a.key || '');
+      return isImage
+        ? '<a href="' + h(url) + '" target="_blank" rel="noopener" title="' + h(name) + '">' +
+          '<img src="' + h(url) + '" alt="' + h(name) + '" style="width:64px;height:64px;' +
+          'object-fit:cover;border-radius:var(--r-sm);border:1px solid var(--border)" /></a>'
+        : '<a class="btn sm" href="' + h(url) + '" target="_blank" rel="noopener">📎 ' +
+          h(name) + '</a>';
+    }).join('') + '</div>';
+  }
+
   function screenTicket(ticketId) {
     var view = document.getElementById('view');
     view.innerHTML = '<div class="page-head"><h1>Ticket</h1></div>' + loading();
@@ -606,7 +622,8 @@
           (fromStaff ? '#4c3a6b;color:#fff' : 'var(--surface-sunk)') + '">' +
           '<div style="font-size:11.5px;opacity:.75;margin-bottom:3px">' +
             h(fromStaff ? 'Staff' : 'Merchant') + ' · ' + h(dateTime(m.createdAt || m.created_at)) + '</div>' +
-          '<div style="white-space:pre-wrap">' + h(m.body || '') + '</div></div></div>';
+          '<div style="white-space:pre-wrap">' + h(m.body || '') + '</div>' +
+          renderAttachments(m.attachments) + '</div></div>';
       }).join('') : (ctx.__err
         ? '<div class="banner warn"><div>Conversation unavailable: ' + h(ctx.__err.message) + '</div></div>'
         : empty('No messages'));

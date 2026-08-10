@@ -7,6 +7,8 @@ import { AnnouncementService } from './announcement.service';
 import { FeedbackService } from './feedback.service';
 import { SupportController } from './support.controller';
 import { TicketService } from './ticket.service';
+import { TicketAttachmentService } from './attachment.service';
+import { BookingOpsModule } from '../booking-ops/booking-ops.module';
 
 /**
  * Support module (§9.18 tickets, §9.19 announcements & feedback; schema in
@@ -24,9 +26,9 @@ import { TicketService } from './ticket.service';
  *    module validates and stores only {key, bytes} references (§5.1).
  */
 @Module({
-  imports: [NotificationsModule, AdminModule],
+  imports: [NotificationsModule, AdminModule, BookingOpsModule],
   controllers: [SupportController, AdminSupportController],
-  providers: [TicketService, AnnouncementService, FeedbackService, RolesGuard],
+  providers: [TicketService, AnnouncementService, FeedbackService, TicketAttachmentService, RolesGuard],
   exports: [TicketService, AnnouncementService, FeedbackService],
 })
 export class SupportModule {}

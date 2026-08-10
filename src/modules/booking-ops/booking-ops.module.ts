@@ -60,6 +60,15 @@ import { NoopSyncBackPublisher, SYNC_BACK_PUBLISHER } from './sync-back-publishe
     },
     { provide: SYNC_BACK_PUBLISHER, useClass: NoopSyncBackPublisher },
   ],
-  exports: [SYNC_BACK_PUBLISHER, BulkBookingService, AutoShipService, PickupService],
+  // OBJECT_STORE is exported so sibling modules can persist their own objects
+  // against the one §9.9.1 store rather than standing up a second one — the
+  // support module's ticket attachments are the first such consumer.
+  exports: [
+    SYNC_BACK_PUBLISHER,
+    BulkBookingService,
+    AutoShipService,
+    PickupService,
+    OBJECT_STORE,
+  ],
 })
 export class BookingOpsModule {}

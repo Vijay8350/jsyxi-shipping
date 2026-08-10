@@ -1859,6 +1859,75 @@
   }
 
   // ─── Support (§9.18) ──────────────────────────────────────────────────
+
+  var ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+  var ATTACH_MAX_FILES = 5;
+
+  /**
+   * Uploads the picked files and returns the {key, bytes} refs the ticket
+   * endpoints expect. Uploading first means a failed file is reported before
+   * the merchant has written a message, not after.
+   */
+  function uploadFiles(input, statusEl) {
+    var files = Array.prototype.slice.call(input.files || []);
+    if (!files.length) return Promise.resolve([]);
+    if (files.length > ATTACH_MAX_FILES) {
+      return Promise.reject(new Error('At most ' + ATTACH_MAX_FILES + ' files per message.'));
+    }
+    var tooBig = files.filter(function (f) { return f.size > ATTACH_MAX_BYTES; });
+    if (tooBig.length) {
+      return Promise.reject(new Error(tooBig[0].name + ' is larger than 10 MB.'));
+    }
+    if (statusEl) statusEl.textContent = 'Uploading ' + files.length + ' file(s)…';
+
+    return Promise.all(files.map(function (file) {
+      return new Promise(function (resolve, reject) {
+        var r = new FileReader();
+        r.onerror = function () { reject(new Error('Could not read ' + file.name)); };
+        r.onload = function () {
+          // readAsDataURL gives "data:<type>;base64,<payload>" — the API wants
+          // only the payload.
+          var b64 = String(r.result).split(',')[1] || '';
+          api('/support/attachments', {
+            method: 'POST',
+            body: { filename: file.name, dataBase64: b64 },
+          }).then(resolve, function (e) {
+            var b = e.body || {};
+            reject(new Error(file.name + ': ' + (b.message || e.message)));
+          });
+        };
+        r.readAsDataURL(file);
+      });
+    })).then(function (refs) {
+      if (statusEl) statusEl.textContent = '';
+      return refs;
+    });
+  }
+
+  function filePicker(id) {
+    return '<div><label for="' + id + '">Attachments <span class="muted">(optional)</span></label>' +
+      '<input class="input" type="file" id="' + id + '" multiple style="width:100%" ' +
+        'accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.csv,.txt,.xls,.xlsx" />' +
+      '<div class="muted" style="font-size:12px;margin-top:3px">' +
+        'Up to 5 files, 10 MB each. Images, PDF, CSV or spreadsheets.</div></div>';
+  }
+
+  /** Attachment chips under a message. Images preview inline. */
+  function renderAttachments(list) {
+    var items = Array.isArray(list) ? list : [];
+    if (!items.length) return '';
+    return '<div class="row" style="gap:8px;margin-top:8px">' + items.map(function (a) {
+      var url = '/support/attachments?key=' + encodeURIComponent(a.key);
+      var name = a.filename || String(a.key).split('/').pop();
+      var isImage = /.(png|jpe?g|gif|webp)$/i.test(a.key || '');
+      return isImage
+        ? '<a href="' + h(url) + '" target="_blank" rel="noopener" title="' + h(name) + '">' +
+          '<img src="' + h(url) + '" alt="' + h(name) + '" style="width:64px;height:64px;' +
+          'object-fit:cover;border-radius:var(--r-sm);border:1px solid var(--border)" /></a>'
+        : '<a class="btn sm" href="' + h(url) + '" target="_blank" rel="noopener">📎 ' +
+          h(name) + '</a>';
+    }).join('') + '</div>';
+  }
   var TICKET_CATEGORIES = ['COURIER_ISSUE', 'BILLING', 'BUG', 'FEATURE', 'OTHER'];
   var TICKET_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
 
@@ -1930,6 +1999,7 @@
             'placeholder="Include an order number or AWB if it relates to one."></textarea></div>' +
         '<div><label for="tawb">Related AWB <span class="muted">(optional)</span></label>' +
           '<input class="input" id="tawb" style="width:100%" placeholder="e.g. DL10007919" /></div>' +
+        filePicker('tfiles') +
       '</form>',
       '<span id="tmsg" class="muted"></span><div class="spacer"></div>' +
       '<button class="btn" data-close>Cancel</button>' +
@@ -1952,7 +2022,10 @@
       var awb = back.querySelector('#tawb').value.trim();
       if (awb) body.linkedAwb = awb;
 
-      api('/support/tickets', { method: 'POST', body: body }).then(function (t) {
+      uploadFiles(back.querySelector('#tfiles'), back.querySelector('#tmsg')).then(function (refs) {
+        if (refs.length) body.attachments = refs;
+        return api('/support/tickets', { method: 'POST', body: body });
+      }).then(function (t) {
         closeModal();
         toast('Ticket raised' + (t && t.number ? ' · ' + t.number : ''));
         if (onDone) onDone();
@@ -1986,6 +2059,7 @@
               h(mine ? 'You' : 'Jsyxi support') + ' · ' +
               h(dateTime(m.createdAt || m.created_at)) + '</div>' +
             '<div style="white-space:pre-wrap">' + h(m.body || '') + '</div>' +
+            renderAttachments(m.attachments) +
           '</div></div>';
       }).join('') : empty('No messages');
 
@@ -2011,7 +2085,9 @@
               : '<div class="card-body" style="border-top:1px solid var(--border)">' +
                 '<textarea class="input" id="reply" rows="3" style="width:100%;resize:vertical" ' +
                   'placeholder="Write a reply…"></textarea>' +
-                '<div class="row" style="margin-top:8px"><div class="spacer" style="flex:1"></div>' +
+                '<div style="margin-top:8px">' + filePicker('rfiles') + '</div>' +
+                '<div class="row" style="margin-top:8px"><span id="rmsg" class="muted"></span>' +
+                '<div class="spacer" style="flex:1"></div>' +
                 '<button class="btn primary" id="sendreply">Send reply</button></div>' +
                 '</div>') +
           '</div>' +
@@ -2024,8 +2100,13 @@
         if (!text) { ta.focus(); return; }
         send.disabled = true;
         send.innerHTML = '<span class="spin"></span> Sending';
-        api('/support/tickets/' + encodeURIComponent(ticketId) + '/messages',
-          { method: 'POST', body: { body: text } })
+        uploadFiles(document.getElementById('rfiles'), document.getElementById('rmsg'))
+          .then(function (refs) {
+            var payload = { body: text };
+            if (refs.length) payload.attachments = refs;
+            return api('/support/tickets/' + encodeURIComponent(ticketId) + '/messages',
+              { method: 'POST', body: payload });
+          })
           .then(function () { toast('Reply sent'); screenTicketThread(ticketId); })
           .catch(function (err) {
             if (err.message === 'unauthenticated') return;

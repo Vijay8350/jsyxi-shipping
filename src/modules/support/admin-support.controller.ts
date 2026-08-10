@@ -7,8 +7,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { AdminGuard } from '../admin/admin.guard';
 import { AdminRoles } from '../admin/admin-roles.decorator';
 import { AdminAuthenticatedRequest } from '../admin/admin.types';
@@ -27,6 +29,7 @@ import {
   TicketState,
 } from './support.types';
 import { TicketService } from './ticket.service';
+import { TicketAttachmentService } from './attachment.service';
 
 /**
  * Admin-side support endpoints (§9.18 inbox, §9.19 composer + feedback
@@ -40,6 +43,7 @@ import { TicketService } from './ticket.service';
 export class AdminSupportController {
   constructor(
     private readonly tickets: TicketService,
+    private readonly attachments: TicketAttachmentService,
     private readonly announcements: AnnouncementService,
     private readonly feedback: FeedbackService,
   ) {}
@@ -47,6 +51,19 @@ export class AdminSupportController {
   /* ------------------------------ Tickets ----------------------------- */
 
   /** §9.18 ticket inbox with filters (state / category / priority / assignment). */
+  /** Staff read of a merchant's ticket attachment (§9.18). */
+  @Get('attachments')
+  async downloadAttachment(
+    @Res() res: Response,
+    @Query('key') key: string,
+  ) {
+    const file = await this.attachments.readAsAdmin(key ?? '');
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(file.bytes);
+  }
+
   @Get('tickets')
   inbox(
     @Query('state') state?: TicketState,

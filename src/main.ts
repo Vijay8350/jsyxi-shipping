@@ -13,6 +13,12 @@ async function bootstrap() {
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, transform: true }),
   );
+  // §5.1 allows a 10 MB ticket attachment, which is ~13.4 MB once base64'd
+  // into a JSON body — Express defaults to 100 kb, so uploads would fail with
+  // an opaque 413. Raised just past the ceiling the DTO already enforces, so
+  // the size limit stays a validation error and not a transport one.
+  // rawBody is preserved: §8.1 webhook HMAC is still computed over raw bytes.
+  app.useBodyParser('json', { limit: '16mb' });
   // §5.7 control 2: TLS 1.2+ is terminated at the platform edge in front of this
   // process; plaintext HTTP is refused there, not redirected. That edge is also
   // the only thing allowed to set X-Forwarded-For, so exactly one hop is
