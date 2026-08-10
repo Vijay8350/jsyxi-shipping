@@ -18,6 +18,8 @@ export interface VisibleAnnouncement {
   title: string;
   body: string;
   type: string;
+  /** Optional illustration (§9.19). http(s) only — validated at the DTO. */
+  image_url: string | null;
   published_at: string;
   expires_at: string | null;
   /** announcement_read.read_at for this member (null = unread badge counts it). */
@@ -59,16 +61,17 @@ export class AnnouncementService {
   async compose(adminId: string, dto: ComposeAnnouncementDto): Promise<AnnouncementRow> {
     const ref = this.validateAudienceRef(dto);
     const { rows } = await this.pool.query<AnnouncementRow>(
-      `INSERT INTO announcement (title, body, type, audience_kind, audience_ref)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO announcement (title, body, type, audience_kind, audience_ref, image_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING announcement_id, title, body, type, audience_kind,
-                 audience_ref, published_at, expires_at, created_at`,
+                 audience_ref, image_url, published_at, expires_at, created_at`,
       [
         dto.title,
         dto.body,
         dto.type,
         dto.audienceKind,
         ref === null ? null : JSON.stringify(ref),
+        dto.imageUrl ?? null,
       ],
     );
     return rows[0];
@@ -77,7 +80,7 @@ export class AnnouncementService {
   async listAll(): Promise<AnnouncementRow[]> {
     const { rows } = await this.pool.query<AnnouncementRow>(
       `SELECT announcement_id, title, body, type, audience_kind, audience_ref,
-              published_at, expires_at, created_at
+              image_url, published_at, expires_at, created_at
          FROM announcement
         ORDER BY created_at DESC`,
     );
@@ -145,7 +148,7 @@ export class AnnouncementService {
   ): Promise<VisibleAnnouncement[]> {
     const planCode = await this.shopPlanCode(shopId);
     const { rows } = await this.pool.query<VisibleAnnouncement>(
-      `SELECT a.announcement_id, a.title, a.body, a.type, a.published_at,
+      `SELECT a.announcement_id, a.title, a.body, a.type, a.image_url, a.published_at,
               a.expires_at, r.read_at, r.dismissed_at
          FROM announcement a
          LEFT JOIN announcement_read r

@@ -719,7 +719,10 @@
             var state = expired && new Date(expired) < new Date() ? 'EXPIRED'
                       : published ? 'PUBLISHED' : 'DRAFT';
             return '<tr>' +
-              '<td><strong>' + h(a.title || '—') + '</strong></td>' +
+              '<td>' + (a.image_url
+                ? '<img src="' + h(a.image_url) + '" alt="" style="width:28px;height:28px;' +
+                  'object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:8px" />'
+                : '') + '<strong>' + h(a.title || '—') + '</strong></td>' +
               '<td>' + badge(a.type) + '</td>' +
               '<td>' + h(titleCase(a.audienceKind || a.audience_kind || 'ALL')) + '</td>' +
               '<td>' + badge(state) + '</td>' +
@@ -794,6 +797,12 @@
               '<input class="input" id="atitle" maxlength="500" required style="width:100%" /></div>' +
             '<div><label for="abody">Message</label>' +
               '<textarea class="input" id="abody" rows="5" required style="width:100%;resize:vertical"></textarea></div>' +
+            '<div><label for="aimg">Image URL <span class="muted">(optional)</span></label>' +
+              '<input class="input" id="aimg" type="url" style="width:100%" ' +
+                'placeholder="https://cdn.example.com/notice.png" />' +
+              '<div class="muted" style="font-size:12px;margin-top:3px">' +
+                'Must be a public https link. Merchants see it beside the message.</div>' +
+              '<div id="aimgprev"></div></div>' +
           '</form>' +
           /* Publishing is the moment it reaches merchants, so composing and
              sending are separate actions — a typo in a WARNING would email
@@ -829,6 +838,32 @@
       }
     });
 
+    /* Preview before sending. A broken or private image link is invisible to
+       the composer but visible to every merchant, so it is worth catching
+       here. Built with DOM calls rather than an inline onerror attribute —
+       nesting quotes inside an HTML attribute inside a JS string is how you
+       ship a syntax error. */
+    var imgInput = back.querySelector('#aimg');
+    imgInput.addEventListener('change', function () {
+      var prev = back.querySelector('#aimgprev');
+      prev.textContent = '';
+      var v = imgInput.value.trim();
+      if (!v) return;
+      var img = document.createElement('img');
+      img.alt = '';
+      img.style.cssText =
+        'max-width:160px;margin-top:8px;border-radius:var(--r-sm);border:1px solid var(--border)';
+      img.onerror = function () {
+        var note = document.createElement('div');
+        note.className = 'muted';
+        note.style.cssText = 'font-size:12px;margin-top:6px';
+        note.textContent = 'That image could not be loaded — check the link is public.';
+        img.replaceWith(note);
+      };
+      img.src = v;
+      prev.appendChild(img);
+    });
+
     back.querySelector('#asave').addEventListener('click', function () {
       var form = back.querySelector('#af');
       if (!form.reportValidity()) return;
@@ -842,6 +877,9 @@
         title: back.querySelector('#atitle').value.trim(),
         body: back.querySelector('#abody').value.trim(),
       };
+      // Only send when filled — an empty string fails @IsUrl.
+      var img = back.querySelector('#aimg').value.trim();
+      if (img) body.imageUrl = img;
       // §3.29: audienceRef must be null for ALL, and shaped per kind otherwise.
       if (aud.value === 'BY_PLAN') {
         body.audienceRef = { planCode: (back.querySelector('#aplan') || {}).value || '' };

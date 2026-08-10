@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsOptional,
+  IsUrl,
   IsString,
   IsUUID,
   Max,
@@ -129,6 +130,18 @@ export class TransitionTicketDto {
 }
 
 export class ComposeAnnouncementDto {
+  /**
+   * §9.19 optional illustration. Restricted to http(s) because the merchant
+   * console renders it as an <img src>: a `javascript:` or `data:` URL there
+   * is script injection into every merchant's dashboard, and an admin account
+   * is exactly the account an attacker would want for that. Validated here,
+   * at the boundary where the value is accepted.
+   */
+  @IsOptional()
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+  @MaxLength(2000)
+  imageUrl?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(500)

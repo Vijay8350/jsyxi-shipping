@@ -184,11 +184,16 @@
             '<div class="spacer"></div>' +
             (shop ? '<span class="muted" style="font-size:13px">' + h(shop) + '</span>' : '') +
             (role ? '<span class="badge">' + h(titleCase(role)) + '</span>' : '') +
+            /* §9.19: the bell is always present so its absence never means
+               "no announcements"; the count badge appears only when unread. */
+            '<button class="btn sm" id="bell" title="Announcements" aria-label="Announcements"' +
+              ' style="position:relative">🔔<span id="bellcount"></span></button>' +
             '<button class="btn sm" id="theme" title="Switch theme" aria-label="Switch theme">' +
               (currentTheme() === 'dark' ? '☀' : '☾') + '</button>' +
             '<button class="btn sm" id="logout">Sign out</button>' +
           '</header>' +
-          '<main class="content" id="view"></main>' +
+          '<div id="annhost" style="padding:22px 24px 0;max-width:1400px;width:100%"></div>' +
+            '<main class="content" id="view"></main>' +
         '</div>' +
       '</div>';
   }
@@ -1751,6 +1756,108 @@
     });
   }
 
+  // ─── Announcements (§9.19) ────────────────────────────────────────────
+
+  /**
+   * Header bell + dismissible banner. Both are best-effort: a merchant whose
+   * role lacks tickets.use still gets a working console, just no bell count,
+   * so failures here are swallowed rather than surfaced as errors.
+   */
+  function refreshAnnouncements() {
+    api('/support/announcements/unread-count').then(function (r) {
+      var n = typeof r === 'number' ? r : (r && (r.count !== undefined ? r.count : r.unread)) || 0;
+      var el = document.getElementById('bellcount');
+      if (!el) return;
+      el.innerHTML = n > 0
+        ? '<span style="position:absolute;top:-5px;right:-5px;background:var(--bad-fg);color:#fff;' +
+          'border-radius:999px;font-size:10.5px;font-weight:700;min-width:16px;height:16px;' +
+          'display:inline-flex;align-items:center;justify-content:center;padding:0 4px">' +
+          h(n > 9 ? '9+' : String(n)) + '</span>'
+        : '';
+    }).catch(function () { /* role may lack tickets.use */ });
+
+    api('/support/announcements/banner').then(function (b) {
+      var a = b && (b.announcement || b);
+      if (!a || !a.announcement_id) return;
+      showBanner(a);
+    }).catch(function () { /* no banner is the normal case */ });
+  }
+
+  function showBanner(a) {
+    if (document.getElementById('annbanner')) return;
+    var content = document.getElementById('annhost');
+    if (!content) return;
+    var tone = a.type === 'WARNING' ? 'warn' : '';
+    var el = document.createElement('div');
+    el.id = 'annbanner';
+    el.className = 'banner ' + tone;
+    el.style.cssText = 'margin-bottom:16px;align-items:flex-start';
+    el.innerHTML =
+      (a.image_url
+        // The URL is http(s)-validated server-side; still rendered as a plain
+        // img with no interpolation into an attribute the browser executes.
+        ? '<img src="' + h(a.image_url) + '" alt="" style="width:64px;height:64px;' +
+          'object-fit:cover;border-radius:var(--r-sm);flex:0 0 auto" />'
+        : '') +
+      '<div style="flex:1">' +
+        '<strong>' + h(a.title) + '</strong><br>' +
+        '<span style="white-space:pre-wrap">' + h(a.body) + '</span>' +
+      '</div>' +
+      '<button class="btn sm" data-dismiss="' + h(a.announcement_id) + '">Dismiss</button>';
+    content.appendChild(el);
+
+    el.querySelector('[data-dismiss]').addEventListener('click', function () {
+      api('/support/announcements/' + encodeURIComponent(a.announcement_id) + '/dismiss',
+        { method: 'POST', body: {} })
+        .catch(function () {})
+        .then(function () { el.remove(); refreshAnnouncements(); });
+    });
+  }
+
+  function openAnnouncements() {
+    var back = modal('Announcements',
+      '<div style="display:grid;place-items:center;padding:26px"><span class="spin"></span></div>',
+      '<div class="spacer"></div><button class="btn" data-close>Close</button>');
+
+    api('/support/announcements').then(function (payload) {
+      var rows = unwrap(payload).length ? unwrap(payload) : (payload || []);
+      if (!Array.isArray(rows)) rows = [];
+
+      var body = rows.length ? rows.map(function (a) {
+        var unread = !a.read_at;
+        return '<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">' +
+          (a.image_url
+            ? '<img src="' + h(a.image_url) + '" alt="" style="width:56px;height:56px;' +
+              'object-fit:cover;border-radius:var(--r-sm);flex:0 0 auto" />'
+            : '') +
+          '<div style="flex:1;min-width:0">' +
+            '<div class="row" style="gap:8px">' +
+              '<strong>' + h(a.title) + '</strong>' +
+              (a.type === 'WARNING' ? '<span class="badge bad">Warning</span>'
+                : a.type === 'UPDATE' ? '<span class="badge info">Update</span>' : '') +
+              (unread ? '<span class="badge">New</span>' : '') +
+            '</div>' +
+            '<div style="white-space:pre-wrap;margin-top:4px">' + h(a.body) + '</div>' +
+            '<div class="muted" style="font-size:12px;margin-top:4px">' +
+              h(dateTime(a.published_at)) + '</div>' +
+          '</div></div>';
+      }).join('') : empty('No announcements', 'Product news and notices appear here.');
+
+      back.querySelector('.modal-body').innerHTML = body;
+      // Opening the list is the read receipt — dismissing every item clears
+      // the badge, which is what a merchant expects from a bell.
+      rows.filter(function (a) { return !a.read_at; }).forEach(function (a) {
+        api('/support/announcements/' + encodeURIComponent(a.announcement_id) + '/dismiss',
+          { method: 'POST', body: {} }).catch(function () {});
+      });
+      setTimeout(refreshAnnouncements, 400);
+    }).catch(function (err) {
+      back.querySelector('.modal-body').innerHTML = err.status === 403
+        ? empty('Not available for your role', 'Announcements need the tickets.use permission (§10.2).')
+        : '<div class="banner bad"><div>' + h(err.message) + '</div></div>';
+    });
+  }
+
   // ─── Support (§9.18) ──────────────────────────────────────────────────
   var TICKET_CATEGORIES = ['COURIER_ISSUE', 'BILLING', 'BUG', 'FEATURE', 'OTHER'];
   var TICKET_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
@@ -1956,6 +2063,9 @@
   function paint() {
     var route = currentRoute();
     root.innerHTML = shell(route);
+
+    document.getElementById('bell').addEventListener('click', openAnnouncements);
+    refreshAnnouncements();
 
     document.getElementById('theme').addEventListener('click', function () {
       localStorage.setItem(THEME_KEY, currentTheme() === 'dark' ? 'light' : 'dark');
